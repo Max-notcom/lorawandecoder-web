@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="color-scheme" content="dark"><title>Payload Decoder</title>
+<link rel="icon" href="data:,"><link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="header"><div class="brand"><span class="brand-mark" aria-hidden="true">[&nbsp;]</span><div><strong>Payload Decoder</strong><span class="muted">LoRaWAN payload inspection</span></div></div><span class="privacy"><span aria-hidden="true">●</span> Processed in your browser</span></header>
+<main>
+<div class="intro"><div><p class="eyebrow">INSPECT / DECODE / EXPLORE</p><h1>From payload to measurements.</h1><p class="muted">Paste a packet or load a dataset. Decode, inspect, and plot without uploading your data.</p></div><button id="export" disabled>Export CSV <span aria-hidden="true">↗</span></button></div>
+<div class="workspace">
+<aside>
+<section class="panel input-panel"><div class="section-title"><h2>Input</h2><span class="muted">Base64 / Hex / CSV</span></div>
+<label for="input" class="sr-only">Payloads or delimited data</label><textarea id="input" spellcheck="false" placeholder="EAAANmFADE8w&#10;EQAASRJA4058&#10;&#10;Or paste a table with a data column…"></textarea>
+<div class="input-actions"><label class="file-button" for="file">Choose CSV file<input id="file" type="file" accept=".csv,.tsv,.txt,text/csv,text/plain"></label><button id="pasteMode" class="quiet">Paste mode</button><button id="example" class="quiet">Load example</button></div>
+<p id="source" class="muted small-text">Pasted input · CSV payload header must be named data</p>
+<div class="two-cols"><label>Encoding<select id="encoding"><option value="auto">Detect automatically</option><option value="base64">Base64</option><option value="hex">Hexadecimal</option></select></label><label>Import action<select id="importMode"><option value="replace">Replace dataset</option><option value="append">Append rows</option></select></label></div>
+<button id="decode" class="primary full">Decode input <span aria-hidden="true">→</span></button>
+</section>
+<section class="panel settings"><h2>Settings</h2><label>Sensor model<select id="model"><option>Unknown</option><option>XS770A</option><option>XS530</option><option>XS550</option><option>XS822</option><option>XS540</option></select></label><p class="muted small-text">Model selection interprets diagnostic bits. Packet types determine measurements.</p>
+<details><summary>Timestamp & display units</summary><label>Timestamp column<input id="timestampColumn" value="auto" list="columns" placeholder="auto, none, or column name"><datalist id="columns"><option value="auto"><option value="none"><option value="ts"><option value="timestamp"></datalist></label><label>Ambiguous date format<select id="timestampFormat"><option value="auto">Detect / report ambiguity</option><option value="dmy">Day / month / year</option><option value="mdy">Month / day / year</option></select></label><p class="muted small-text">Applied on import. Dates without offsets keep their original wall-clock time; no timezone is assumed.</p><div class="two-cols"><label>Temperature<select id="temperature"><option value="native">Native (°C)</option><option value="fahrenheit">Fahrenheit (°F)</option></select></label><label>Pressure<select id="pressure"><option value="native">Native (MPa)</option><option value="bar">bar</option><option value="psi">psi</option></select></label></div></details>
+<details><summary>Browser storage</summary><label class="check"><input id="persist" type="checkbox">Remember latest dataset</label><p class="muted small-text">Off by default. When enabled, the current dataset and display settings stay on this browser. Refreshing restores it. Browser cleanup can remove it.</p><button id="clearSaved" class="quiet">Clear saved data</button><p id="storageStatus" class="muted small-text" role="status">Storage off · data clears when this tab closes</p></details>
+<button id="clear" class="quiet full">Clear current dataset</button>
+</section>
+<div class="local-note"><span aria-hidden="true">↳</span> No accounts. No uploads. No external data requests.</div>
+</aside>
+<div class="results">
+<div id="message" class="message" role="status" aria-live="polite">Ready for input.</div>
+<div class="summary-bar"><div><strong id="total">0</strong><span>rows</span></div><div><strong id="valid">0</strong><span>decoded</span></div><div><strong id="errors">0</strong><span>issues</span></div><div><strong id="duplicates">0</strong><span>repeated payload rows</span></div></div>
+<section class="panel table-panel"><div class="section-title"><h2>Decoded data</h2><div class="table-controls"><label class="check"><input id="highlight" type="checkbox">Highlight duplicates</label><label class="sr-only" for="rowFilter">Filter records</label><select id="rowFilter"><option value="all">All rows</option><option value="issues">Rows with issues</option><option value="duplicates">Repeated payloads</option></select></div></div>
+<div class="table-scroll"><table><thead><tr><th>Row / source</th><th>Timestamp</th><th>Raw payload</th><th>Decoded measurements</th><th>Details</th></tr></thead><tbody id="tbody"><tr><td colspan="5" class="empty">No dataset loaded.</td></tr></tbody></table></div>
+<div class="pagination"><span id="pageInfo" class="muted">0 rows</span><div><button id="prev" class="small" disabled>Previous</button><button id="next" class="small" disabled>Next</button></div></div>
+</section>
+<section class="panel"><div class="section-title"><h2>Charts</h2><label class="inline-label">Horizontal axis<select id="axis"><option value="sample">Sample order</option><option value="time">Timestamp</option></select></label></div>
+<details id="seriesDetails" open><summary>Measurements <span id="seriesCount" class="muted"></span></summary><div class="selection-actions"><button id="selectAll" class="quiet small">Select all</button><button id="selectNone" class="quiet small">Clear selection</button></div><div id="series" class="series"><span class="muted">Numeric fields will appear after decoding.</span></div></details>
+<details class="chart-filters"><summary>Reading filters</summary><label class="check"><input type="checkbox" id="includeErrors">Include measurement-error values</label><label class="check"><input type="checkbox" id="hideOverrange">Hide overrange values</label><label class="check"><input type="checkbox" id="hideSimulation">Hide simulation values</label></details>
+<p id="timeNote" class="muted small-text"></p><div id="charts"><p class="empty">Your charts will appear here.</p></div>
+</section>
+
+</div></div>
+<footer><span>Independent tool · All decoding happens locally</span><span>Native units exported · Full precision retained</span></footer>
+</main>
+</body></html>
