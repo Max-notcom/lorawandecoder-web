@@ -7,9 +7,9 @@
 <link rel="icon" href="data:,"><link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script>
 </head>
 <body>
-<header class="header"><div class="brand"><span class="brand-mark" aria-hidden="true">[&nbsp;]</span><div><strong>Payload Decoder</strong><span class="muted">LoRaWAN payload inspection</span></div></div><span class="privacy"><span aria-hidden="true">●</span> Processed in your browser</span></header>
+<header class="header"><div class="brand"><span class="brand-mark" aria-hidden="true">[&nbsp;]</span><div><strong>Payload Decoder</strong><span class="muted">LoRaWAN payload inspection</span></div></div></header>
 <main>
-<div class="intro"><div><p class="eyebrow">INSPECT / DECODE / EXPLORE</p><h1>From payload to measurements.</h1><p class="muted">Paste a packet or load a dataset. Decode, inspect, and plot without uploading your data.</p></div><button id="export" disabled>Export CSV <span aria-hidden="true">↗</span></button></div>
+<div class="intro"><div><p class="eyebrow">INSPECT / DECODE / EXPLORE</p><h1>From payload to measurements.</h1><p class="muted">Paste a packet or load a dataset. Decode, inspect, and plot your measurements.</p></div><button id="export" disabled>Export CSV <span aria-hidden="true">↗</span></button></div>
 <div class="workspace">
 <aside>
 <section class="panel input-panel"><div class="section-title"><h2>Input</h2><span class="muted">Base64 / Hex / CSV</span></div>
@@ -24,14 +24,15 @@
 <details><summary>Browser storage</summary><label class="check"><input id="persist" type="checkbox">Remember latest dataset</label><p class="muted small-text">Off by default. When enabled, the current dataset and display settings stay on this browser. Refreshing restores it. Browser cleanup can remove it.</p><button id="clearSaved" class="quiet">Clear saved data</button><p id="storageStatus" class="muted small-text" role="status">Storage off · data clears when this tab closes</p></details>
 <button id="clear" class="quiet full">Clear current dataset</button>
 </section>
-<div class="local-note"><span aria-hidden="true">↳</span> No accounts. No uploads. No external data requests.</div>
+
 </aside>
 <div class="results">
 <div id="message" class="message" role="status" aria-live="polite">Ready for input.</div>
 <div class="summary-bar"><div><strong id="total">0</strong><span>rows</span></div><div><strong id="valid">0</strong><span>decoded</span></div><div><strong id="errors">0</strong><span>issues</span></div><div><strong id="duplicates">0</strong><span>repeated payload rows</span></div></div>
 <section class="panel table-panel"><div class="section-title"><h2>Decoded data</h2><div class="table-controls"><label class="check"><input id="highlight" type="checkbox">Highlight duplicates</label><label class="sr-only" for="rowFilter">Filter records</label><select id="rowFilter"><option value="all">All rows</option><option value="issues">Rows with issues</option><option value="duplicates">Repeated payloads</option></select></div></div>
+<div class="table-filters"><label>Data type<select id="dataFilter"><option value="all">All data types</option></select></label><label>Search<input id="tableSearch" type="search" placeholder="Measurement, value, payload…" autocomplete="off"></label><button id="resetFilters" class="quiet small">Reset filters</button></div>
 <div class="table-scroll"><table><thead><tr><th>Row / source</th><th>Timestamp</th><th>Raw payload</th><th>Decoded measurements</th><th>Details</th></tr></thead><tbody id="tbody"><tr><td colspan="5" class="empty">No dataset loaded.</td></tr></tbody></table></div>
-<div class="pagination"><span id="pageInfo" class="muted">0 rows</span><div><button id="prev" class="small" disabled>Previous</button><button id="next" class="small" disabled>Next</button></div></div>
+<div class="pagination"><span id="pageInfo" class="muted" role="status" aria-live="polite">0 rows</span><nav class="page-controls" aria-label="Table pages"><button id="prev" class="small" disabled>Previous</button><span id="pageNumbers" class="page-numbers"></span><button id="next" class="small" disabled>Next</button></nav><form id="pageJump" class="page-jump"><label for="pageInput">Go to page</label><input id="pageInput" type="number" min="1" max="1" step="1" value="1" disabled><button id="goPage" class="small" disabled>Go</button></form></div>
 </section>
 <section class="panel"><div class="section-title"><h2>Charts</h2><label class="inline-label">Horizontal axis<select id="axis"><option value="sample">Sample order</option><option value="time">Timestamp</option></select></label></div>
 <details id="seriesDetails" open><summary>Measurements <span id="seriesCount" class="muted"></span></summary><div class="selection-actions"><button id="selectAll" class="quiet small">Select all</button><button id="selectNone" class="quiet small">Clear selection</button></div><div id="series" class="series"><span class="muted">Numeric fields will appear after decoding.</span></div></details>
@@ -40,6 +41,6 @@
 </section>
 
 </div></div>
-<footer><span>Independent tool · All decoding happens locally</span><span>Native units exported · Full precision retained</span></footer>
+
 </main>
 </body></html>

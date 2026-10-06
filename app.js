@@ -1,5 +1,5 @@
 import {decode,isChartable,convertValue} from './decoder.js';
-import {markDuplicates,parseDelimited,detectDelimiter} from './data.js';
+import {markDuplicates,parseDelimited,detectDelimiter,filterRows,pageNumbers,DATA_GROUPS,matchesDataKind} from './data.js';
 import {drawCharts} from './charts.js';
 import {saveDataset,loadDataset,clearDataset} from './storage.js';
 const $=id=>document.getElementById(id);
@@ -30,13 +30,23 @@ function refreshFields(preserve=false){
  selected=preserve?new Set(fields.filter(f=>selected.has(f)||!previous.has(f))):new Set(fields);
  const fragment=document.createDocumentFragment();for(const f of fields){const label=el('label',undefined,'check'),input=el('input');input.type='checkbox';input.checked=selected.has(f);input.value=f;input.onchange=()=>{input.checked?selected.add(f):selected.delete(f);renderCharts();persistCurrent();};label.append(input,document.createTextNode(f));fragment.append(label);}
  $('series').replaceChildren(fragment);if(!fields.length)$('series').append(el('span','No numeric measurements available.','muted'));
- $('seriesCount').textContent=fields.length?`· ${fields.length} available`:'';
+ $('seriesCount').textContent=fields.length?`· ${fields.length} available`:'';refreshTableFilters();
 }
 function renderCharts(){disposeCharts();const settings=getSettings();const timed=rows.filter(r=>r.time!==null).length;const wall=rows.some(r=>r.timeKind==='wall'),instant=rows.some(r=>r.timeKind==='instant');
  $('timeNote').textContent=settings.axis==='time'?`${timed.toLocaleString()} of ${rows.length.toLocaleString()} rows have usable timestamps.${wall?' Timezone-free timestamps are shown as supplied.':''}${wall&&instant?' Wall-clock and offset-aware timestamps are plotted separately.':''}`:'';
  disposeCharts=drawCharts($('charts'),rows,selected,settings);
 }
-function filteredRows(){const filter=$('rowFilter').value;return filter==='all'?rows:rows.filter(r=>filter==='issues'?!!(r.error||r.timestampError||r.decoded?.flags.length||r.decoded?.warnings.length):r.duplicate);}
+function refreshTableFilters(){
+ const select=$('dataFilter'),previous=select.value,options=[el('option','All data types')];options[0].value='all';
+ const categories=el('optgroup');categories.label='Measurement groups';
+ for(const [key,[label]] of Object.entries(DATA_GROUPS)){const option=el('option',label);option.value='group:'+key;option.disabled=!rows.some(r=>matchesDataKind(r,option.value));categories.append(option);}options.push(categories);
+ const names=[...new Set(rows.flatMap(r=>Object.keys(r.decoded?.values||{})))].sort(),measurements=el('optgroup');measurements.label='Specific fields';
+ for(const name of names){const option=el('option',name);option.value='field:'+name;measurements.append(option);}if(names.length)options.push(measurements);
+ const types=new Map();for(const r of rows)if(r.decoded)types.set(r.decoded.type,r.decoded.label);
+ const packets=el('optgroup');packets.label='Packet types';for(const [type,label] of types){const option=el('option',`${label} · 0x${type.toString(16)}`);option.value='type:'+type;packets.append(option);}if(types.size)options.push(packets);
+ select.replaceChildren(...options);select.value=[...select.options].some(o=>o.value===previous&&!o.disabled)?previous:'all';
+}
+function filteredRows(){return filterRows(rows,{status:$('rowFilter').value,kind:$('dataFilter').value,query:$('tableSearch').value});}
 function renderTable(){
  const view=filteredRows(),pages=Math.ceil(view.length/PAGE_SIZE);page=Math.max(0,Math.min(page,pages-1));const fragment=document.createDocumentFragment(),settings=getSettings();
  for(const r of view.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE)){
@@ -60,6 +70,7 @@ function renderTable(){
  }
  if(!view.length){const tr=el('tr'),td=el('td',rows.length?'No records match this filter.':'No dataset loaded.','empty');td.colSpan=5;tr.append(td);fragment.append(tr);}
  $('tbody').replaceChildren(fragment);$('pageInfo').textContent=view.length?`${page*PAGE_SIZE+1}–${Math.min((page+1)*PAGE_SIZE,view.length)} of ${view.length.toLocaleString()} rows · page ${page+1}/${pages}`:'0 rows';$('prev').disabled=page===0;$('next').disabled=page>=pages-1;
+ const buttons=pageNumbers(pages,page).map(number=>{if(number===null)return el('span','…','muted');const button=el('button',String(number),'small');button.type='button';button.setAttribute('aria-label',`Page ${number}`);if(number===page+1)button.setAttribute('aria-current','page');button.onclick=()=>{page=number-1;renderTable();$('pageNumbers').querySelector('[aria-current=page]')?.focus();};return button;});$('pageNumbers').replaceChildren(...buttons);$('pageInput').max=Math.max(1,pages);$('pageInput').value=page+1;$('pageInput').disabled=!pages;$('goPage').disabled=!pages;$('pageInput').setCustomValidity('');
 }
 function renderSummary(){const valid=rows.filter(r=>r.decoded).length,issues=rows.filter(r=>r.error||r.timestampError||r.decoded?.flags.length||r.decoded?.warnings.length).length;for(const [id,n] of [['total',rows.length],['valid',valid],['errors',issues],['duplicates',rows.filter(r=>r.duplicate).length]])$(id).textContent=n.toLocaleString();$('export').disabled=busy||!rows.length;}
 function render(){renderSummary();renderCharts();renderTable();}
@@ -80,7 +91,12 @@ $('pasteMode').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input')
 $('example').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input').value='data,ts\nEAAANmFADE8w,2026-10-06 (09:00:00.000)\nEQAASRJA4058,2026-10-06 (09:15:00.000)\nEAAANmFADE8w,2026-10-06 (09:30:00.000)';source='Example';$('source').textContent='Example · three packets including one repeated payload';updateColumnHints();message('Example ready. Select Decode input.');};
 $('model').onchange=()=>{for(const r of rows)if(r.decoded?.type===0x41){try{r.decoded=decode(r.raw,{encoding:r.decoded.encoding,model:$('model').value});}catch(e){r.error=e.message;}}render();persistCurrent();};
 for(const id of settingIDs.filter(id=>id!=='model'))$(id).onchange=()=>{render();persistCurrent();};
-$('rowFilter').onchange=()=>{page=0;renderTable();};$('prev').onclick=()=>{page--;renderTable();};$('next').onclick=()=>{page++;renderTable();};
+const resetTablePage=()=>{page=0;renderTable();};$('rowFilter').onchange=resetTablePage;$('dataFilter').onchange=resetTablePage;
+let searchTimer;$('tableSearch').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(resetTablePage,150);};
+$('resetFilters').onclick=()=>{clearTimeout(searchTimer);$('rowFilter').value='all';$('dataFilter').value='all';$('tableSearch').value='';resetTablePage();};
+$('prev').onclick=()=>{page--;renderTable();};$('next').onclick=()=>{page++;renderTable();};
+$('pageInput').oninput=()=>{$('pageInput').setCustomValidity('');};
+$('pageJump').onsubmit=event=>{event.preventDefault();const input=$('pageInput'),value=Number(input.value),pages=Math.ceil(filteredRows().length/PAGE_SIZE);if(!Number.isInteger(value)||value<1||value>pages){input.setCustomValidity(`Enter a page from 1 to ${Math.max(1,pages)}.`);input.reportValidity();return;}page=value-1;renderTable();};
 function setSelection(all){selected=new Set(all?fields:[]);for(const box of $('series').querySelectorAll('input'))box.checked=all;renderCharts();persistCurrent();}
 $('selectAll').onclick=()=>setSelection(true);$('selectNone').onclick=()=>setSelection(false);
 $('export').onclick=async()=>{if(busy||!rows.length)return;$('export').disabled=true;try{message('Preparing CSV locally…');const {csv}=await request({action:'export',rows});const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=el('a');a.href=url;a.download='decoded-payloads.csv';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);message('CSV exported with native units and full decoded precision.','success');}catch(e){message(`Export failed: ${e.message}`,'error');}finally{$('export').disabled=!rows.length;}};
