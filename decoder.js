@@ -114,8 +114,13 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
   length(9);r.label='Diagnostics';add('DiagnosticStatus',d.getUint32(1));add('DiagnosticDetail',d.getUint32(5));
   const maps=diagnosticMaps[model]||[{31:'Failure',30:'Function check',29:'Out of specification',28:'Maintenance required'},{}];
   r.diagnostics=[...describeBits(r.values.DiagnosticStatus,maps[0],'Status'),...describeBits(r.values.DiagnosticDetail,maps[1],'Detail')];
-  if(!r.diagnostics.length)r.diagnostics.push('No diagnostic bits set');
-  if(!diagnosticMaps[model])r.warnings.push('Select a sensor model to interpret model-specific diagnostic bits');
+  const status=r.values.DiagnosticStatus,detail=r.values.DiagnosticDetail;
+  const hex=word=>'0x'+word.toString(16).padStart(8,'0');
+  const categories=[[31,'Failure'],[30,'Function check'],[29,'Out of specification'],[28,'Maintenance required']].map(([bit,label])=>`${label}: ${(status>>>bit)&1?'SET':'clear'} (bit ${bit})`);
+  r.diagnostics.unshift(`Diagnostic status (bytes 1–4): ${hex(status)}`,`Diagnostic detail (bytes 5–8): ${hex(detail)}`,...categories);
+  if(!status&&!detail)r.diagnostics.push('No active diagnostics reported: both words are zero. This packet reports no diagnostic conditions; it does not establish overall equipment health.');
+  if(!detail)r.diagnostics.push('No detailed diagnostic bits set.');
+  if((status||detail)&&!diagnosticMaps[model])r.warnings.push('Select a sensor model to interpret model-specific diagnostic bits');
  } else if(type===0x42) {
   length(11);r.label='Initialization';const chars=b.slice(1);if(chars.some(x=>x>127))throw Error('Tag name contains non-ASCII bytes');
   const end=chars.indexOf(0);add('TagName',String.fromCharCode(...(end<0?chars:chars.slice(0,end))));

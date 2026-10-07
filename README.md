@@ -81,3 +81,7 @@ This repository contains the runtime assets and this README. Development tests a
 ## Special recorded sequence
 
 `AyABAHEDIP8AAQMgAABBBAAFCGjijA==` is recognized by its exact decoded bytes and marked **Special**. Inspect shows a possible sequence of three LinkADRReq commands, DutyCycleReq and RXParamSetupReq, including an RX2 frequency of 923.3 MHz. This interpretation is unconfirmed because the recording lacks direction, FPort, LoRaWAN version and regional settings. These control commands do not produce chartable measurements. The table's Special messages filter finds this record; CSV export retains its flag, caution and details. Other unknown byte sequences remain unsupported.
+
+## Diagnostic reports
+
+`QQAAAAAAAAAA` decodes to `41 00 00 00 00 00 00 00 00`: a diagnostic packet with status and detail words both `0x00000000`. It reports no active diagnostic bits. Inspect shows each raw word and the four category bits: Failure, Function check, Out of specification, and Maintenance required. Select a sensor model to interpret nonzero model-specific bits. Zero words do not require a model and do not establish overall equipment health.
