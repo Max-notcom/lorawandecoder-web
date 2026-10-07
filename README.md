@@ -77,3 +77,7 @@ Open [http://127.0.0.1:8765](http://127.0.0.1:8765). No installation or build is
 Cloudflare Pages deploys this repository's `main` branch automatically. The framework is None, build command is `exit 0`, and output directory is `.`. `_headers` supplies security headers, including a policy that blocks outbound data connections.
 
 This repository contains the runtime assets and this README. Development tests and internal project documentation are maintained separately.
+
+## Special recorded sequence
+
+`AyABAHEDIP8AAQMgAABBBAAFCGjijA==` is recognized by its exact decoded bytes and marked **Special**. Inspect shows a possible sequence of three LinkADRReq commands, DutyCycleReq and RXParamSetupReq, including an RX2 frequency of 923.3 MHz. This interpretation is unconfirmed because the recording lacks direction, FPort, LoRaWAN version and regional settings. These control commands do not produce chartable measurements. The table's Special messages filter finds this record; CSV export retains its flag, caution and details. Other unknown byte sequences remain unsupported.

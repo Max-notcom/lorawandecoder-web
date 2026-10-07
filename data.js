@@ -97,7 +97,7 @@ export function exportCSV(rows) {
  const fields=[...new Set(rows.flatMap(r=>Object.keys(r.decoded?.values||{})))];
  const headers=['Source','SourceRow','SourceLine','Timestamp','TimestampKind','RawPayload','PacketType',...fields.map(name=>{const unit=rows.find(r=>r.decoded?.units[name])?.decoded.units[name];return unit?`${name} (${unit})`:name;}),'MeasurementStatus','Flags','Warnings','Diagnostics','Error','TimestampError'];
  const lines=[headers.map(safeCell).join(',')];
- for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.timestamp,r.timeKind,r.raw,d?`0x${d.type.toString(16)}`:'',...fields.map(k=>d?.values[k]??''),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
+ for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.timestamp,r.timeKind,r.raw,d?(d.special?'special':`0x${d.type.toString(16)}`):'',...fields.map(k=>d?.values[k]??''),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
  return '\ufeff'+lines.join('\r\n');
 }
 
@@ -112,7 +112,8 @@ export const DATA_GROUPS = {
  location:['Location',name=>/Longitude|Latitude|Altitude/.test(name)],
  trap:['Trap condition',name=>name.startsWith('TrapCondition')],
  equipment:['Equipment',name=>['VendorID','DeviceType','DeviceRevision'].includes(name)],
- initialization:['Initialization',name=>name==='TagName']
+ initialization:['Initialization',name=>name==='TagName'],
+ special:['Special messages',name=>name==='SpecialMessage']
 };
 export function matchesDataKind(row,kind='all') {
  if(kind==='all')return true;
@@ -131,7 +132,7 @@ export function filterRows(rows,{status='all',kind='all',query=''}={}) {
   if(status==='duplicates'&&!row.duplicate)return false;
   if(!matchesDataKind(row,kind))return false;
   if(!search)return true;
-  return [row.raw,row.source,row.row,row.timestamp,row.error,row.timestampError,d?.label,d?`0x${d.type.toString(16)}`:'',...Object.entries(d?.values||{}).map(([name,value])=>`${name} ${String(value)}`),...(d?.flags||[]),...(d?.warnings||[]),...(d?.diagnostics||[])].join(' ').toLowerCase().includes(search);
+  return [row.raw,row.source,row.row,row.timestamp,row.error,row.timestampError,d?.label,d?(d.special?'special':`0x${d.type.toString(16)}`):'',...Object.entries(d?.values||{}).map(([name,value])=>`${name} ${String(value)}`),...(d?.flags||[]),...(d?.warnings||[]),...(d?.diagnostics||[])].join(' ').toLowerCase().includes(search);
  });
 }
 export function pageNumbers(total,current) {

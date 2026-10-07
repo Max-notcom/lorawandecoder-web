@@ -55,13 +55,13 @@ function renderTable(){
   const time=el('td',r.timestamp||'—','time');if(r.timestampError)time.append(el('div',r.timestampError,'issue'));else if(r.timeKind==='wall')time.append(el('div','Timezone unspecified','muted'));else if(r.timeKind==='instant')time.append(el('div','Offset-aware / epoch','muted'));
   const raw=el('td',r.raw||'(empty)','raw'),values=el('td'),details=el('td',undefined,'row-details');
   if(r.error)values.append(el('div',r.error,'issue'));
-  else {const d=r.decoded;values.append(el('div',`${d.label} · 0x${d.type.toString(16)}`,'muted'));
+  else {const d=r.decoded;values.append(el('div',d.special?d.label:`${d.label} · 0x${d.type.toString(16)}`,'muted'));
    if(d.type===0x41||d.type===0x47)values.append(el('span','Technical fields in details','muted'));
    else for(const [name,value] of Object.entries(d.values)){
     const line=el('div',undefined,'measurement');line.append(el('span',name));const [converted,unit]=typeof value==='number'?convertValue(value,d.units[name],settings):[value,''];line.append(el('b',`${typeof converted==='number'?formatNumber(converted):converted}${unit?' '+unit:''}`));
     if(d.invalidFields.includes(name))line.append(el('span',' · error','issue'));else if(d.overrangeFields.includes(name))line.append(el('span',' · overrange','warning'));values.append(line);
    }
-   const warned=d.flags.length||d.warnings.length;details.append(el('span',warned?'Flagged':'Decoded','badge'+(warned?' warning':'')));
+   const warned=d.flags.length||d.warnings.length;details.append(el('span',d.special?'Special':warned?'Flagged':'Decoded','badge'+(warned?' warning':'')));
    const disclosure=el('details'),summary=el('summary','Inspect'),content=el('pre');
    const full=Object.entries(d.values).map(([k,v])=>`${k}: ${String(v)}${d.units[k]?' '+d.units[k]:''}`);
    content.textContent=[`Encoding: ${d.encoding}`,`Bytes: ${d.hex}`,d.status===null?'':`Measurement status: 0x${d.status.toString(16).padStart(4,'0')}`,d.measurementCount==null?'':`Measurement count: ${d.measurementCount}`,...full,...d.flags,...d.warnings,...d.diagnostics].filter(Boolean).join('\n');disclosure.append(summary,content);details.append(disclosure);

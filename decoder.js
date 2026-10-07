@@ -55,6 +55,20 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
  const b=bytesFrom(payload,encoding), d=new DataView(b.buffer);
  const type=b[0]===0x80 && b.length>=2?d.getUint16(0):b[0];
  const r={type,label:'',hex:Array.from(b,x=>x.toString(16).padStart(2,'0')).join(' '),encoding,values:{},units:{},status:null,flags:[],invalidFields:[],overrangeFields:[],diagnostics:[],warnings:[]};
+ // Recognize only the supplied sequence; without frame metadata, do not guess other MAC messages.
+ if(r.hex.replaceAll(' ','')==='03200100710320ff000103200000410400050868e28c') {
+  r.special=true;r.label='Special network-control sequence';
+  r.values.SpecialMessage='Possible LoRaWAN MAC downlink';
+  r.flags.push('Special message');
+  r.warnings.push('Interpretation unconfirmed: direction, FPort, LoRaWAN version and regional frequency plan are unavailable.');
+  r.diagnostics=[
+   '03 20 01 00 71 — Possible LinkADRReq: data-rate index 2, power index 0, channel mask 0x0001, mask control 7, transmission count 1.',
+   '03 20 FF 00 01 — Possible LinkADRReq: data-rate index 2, power index 0, channel mask 0x00FF, mask control 0, transmission count 1.',
+   '03 20 00 00 41 — Possible LinkADRReq: data-rate index 2, power index 0, channel mask 0x0000, mask control 4, transmission count 1.',
+   '04 00 — Possible DutyCycleReq: no additional aggregated duty-cycle restriction.',
+   '05 08 68 E2 8C — Possible RXParamSetupReq: RX1 offset 0, RX2 data-rate index 8, frequency 923.3 MHz.'
+  ];return r;
+ }
  const length=n=>{if(b.length!==n)throw Error(`Packet 0x${type.toString(16)} length: expected ${n} bytes, received ${b.length}`);};
  const add=(name,value,unit='')=>{r.values[name]=value;r.units[name]=unit;if(typeof value==='number'&&!Number.isFinite(value)){r.warnings.push(`${name}: nonfinite value (${String(value)})`);r.invalidFields.push(name);}};
  const measured=(fields,trap=false,shared=false)=>{
