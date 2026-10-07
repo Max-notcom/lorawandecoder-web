@@ -13,7 +13,7 @@ A static browser tool for decoding LoRaWAN sensor payloads and inspecting measur
 - Navigate with numbered pages or jump directly to a page.
 - Select numeric measurements for charts, hover for values, and zoom into a range.
 - Highlight repeated payloads without deleting them.
-- Export decoded data as CSV. Native units and full decoded precision are retained.
+- Export decoded data as CSV. Decoded units and full precision are retained; legacy device-unit uncertainty is labeled explicitly.
 - Use a responsive dark interface with keyboard-accessible controls.
 
 ## Import data
@@ -47,6 +47,7 @@ Charts separate incompatible units. Measurement-error values are excluded by def
 
 | Types | Data |
 | --- | --- |
+| `0x00` | Legacy display-unit codes |
 | `0x10`–`0x13` | Axis/composite vibration measurements |
 | `0x20`, `0x21` | Temperature channels |
 | `0x30`, `0x31` | Pressure and temperature |
@@ -92,3 +93,11 @@ This repository contains the runtime assets and this README. Development tests a
 `SAAAAAo=` decodes to `48 00 00 00 0A`. Packet type `0x48` contains a four-byte unsigned transmission interval: **10 minutes** in this example. The table and CSV expose `TransmissionInterval` in minutes; use the Reporting interval filter to find it. The value can be selected for charts, but it is not used to invent timestamps.
 
 This legacy format is documented for XS530/XS550 in section 7.7, table 7-11 of the [official Japanese software manual](https://web-material3.yokogawa.com/19/25291/files/IM01W06C01-01JA_001.pdf). It is absent from the English manual initially supplied for this project.
+
+## Protocol edition and legacy unit metadata
+
+Settings → Protocol edition selects **English (current)** or **Japanese (legacy)** status/diagnostic definitions. English is the default. Switching reinterprets the loaded decoded rows; browser storage remembers the edition. Supported packet types remain available in either mode.
+
+The Japanese first edition additionally documents `0x00` display-unit metadata: three UINT16 codes for temperature, voltage and pressure, followed by a reserved UINT16 word expected to be `FFFF`. Inspect shows the raw codes. Use **Data type → Display unit codes** to find them. Code enums are not provided by the compared manuals, so the tool does not guess their unit names or plot them as measurements.
+
+Japanese mode includes the legacy XS770A RF/NFC diagnostic bits and treats the documented reserved bits separately from newer firmware-update/counter meanings. Legacy temperature-module and pressure units can be configured on the device; readings use explicit device-unit labels without conversion. CSV includes ProtocolEdition and per-row units when a field has mixed units. The newer English XS822/XS540 definitions remain available.

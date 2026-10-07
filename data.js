@@ -95,9 +95,10 @@ const safeCell=value=>{
 };
 export function exportCSV(rows) {
  const fields=[...new Set(rows.flatMap(r=>Object.keys(r.decoded?.values||{})))];
- const headers=['Source','SourceRow','SourceLine','Timestamp','TimestampKind','RawPayload','PacketType',...fields.map(name=>{const unit=rows.find(r=>r.decoded?.units[name])?.decoded.units[name];return unit?`${name} (${unit})`:name;}),'MeasurementStatus','Flags','Warnings','Diagnostics','Error','TimestampError'];
+ const fieldInfo=fields.map(name=>{const units=[...new Set(rows.filter(r=>r.decoded&&name in r.decoded.values).map(r=>r.decoded.units[name]||''))];return {name,unit:units[0]||'',mixed:units.length>1};});
+ const headers=['Source','SourceRow','SourceLine','Timestamp','TimestampKind','RawPayload','PacketType','ProtocolEdition',...fieldInfo.flatMap(({name,unit,mixed})=>mixed?[`${name} (mixed units)`,name+'Unit']:[unit?`${name} (${unit})`:name]),'MeasurementStatus','Flags','Warnings','Diagnostics','Error','TimestampError'];
  const lines=[headers.map(safeCell).join(',')];
- for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.timestamp,r.timeKind,r.raw,d?(d.special?'special':`0x${d.type.toString(16)}`):'',...fields.map(k=>d?.values[k]??''),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
+ for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.timestamp,r.timeKind,r.raw,d?(d.special?'special':`0x${d.type.toString(16)}`):'',d?(d.profile||'english'):'',...fieldInfo.flatMap(({name,mixed})=>mixed?[d?.values[name]??'',d?.units[name]||'']:[d?.values[name]??'']),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
  return '\ufeff'+lines.join('\r\n');
 }
 
@@ -114,7 +115,8 @@ export const DATA_GROUPS = {
  equipment:['Equipment',name=>['VendorID','DeviceType','DeviceRevision'].includes(name)],
  initialization:['Initialization',name=>name==='TagName'],
  special:['Special messages',name=>name==='SpecialMessage'],
- reporting:['Reporting interval',name=>name==='TransmissionInterval']
+ reporting:['Reporting interval',name=>name==='TransmissionInterval'],
+ units:['Display unit codes',name=>name.endsWith('DisplayUnitCode')]
 };
 export function matchesDataKind(row,kind='all') {
  if(kind==='all')return true;

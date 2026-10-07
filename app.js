@@ -5,7 +5,7 @@ import {saveDataset,loadDataset,clearDataset} from './storage.js';
 const $=id=>document.getElementById(id);
 let rows=[],selected=new Set(),fields=[],page=0,source='Pasted input',busy=false,restoring=false,loadedText=null,disposeCharts=()=>{},worker=null,job=0,storageQueue=Promise.resolve();
 const pending=new Map();const PAGE_SIZE=50;
-const settingIDs=['model','temperature','pressure','axis','highlight','includeErrors','hideOverrange','hideSimulation'];
+const settingIDs=['model','profile','temperature','pressure','axis','highlight','includeErrors','hideOverrange','hideSimulation'];
 const getSettings=()=>Object.fromEntries(settingIDs.map(id=>[id,$(id).type==='checkbox'?$(id).checked:$(id).value]));
 const message=(text,type='')=>{$('message').textContent=text;$('message').className='message '+type;};
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
@@ -56,7 +56,7 @@ function renderTable(){
   const raw=el('td',r.raw||'(empty)','raw'),values=el('td'),details=el('td',undefined,'row-details');
   if(r.error)values.append(el('div',r.error,'issue'));
   else {const d=r.decoded;values.append(el('div',d.special?d.label:`${d.label} · 0x${d.type.toString(16)}`,'muted'));
-   if(d.type===0x41||d.type===0x47)values.append(el('span','Technical fields in details','muted'));
+   if(d.type===0x00||d.type===0x41||d.type===0x47)values.append(el('span','Technical fields in details','muted'));
    else for(const [name,value] of Object.entries(d.values)){
     const line=el('div',undefined,'measurement');line.append(el('span',name));const [converted,unit]=typeof value==='number'?convertValue(value,d.units[name],settings):[value,''];line.append(el('b',`${typeof converted==='number'?formatNumber(converted):converted}${unit?' '+unit:''}`));
     if(d.invalidFields.includes(name))line.append(el('span',' · error','issue'));else if(d.overrangeFields.includes(name))line.append(el('span',' · overrange','warning'));values.append(line);
@@ -64,7 +64,7 @@ function renderTable(){
    const warned=d.flags.length||d.warnings.length;details.append(el('span',d.special?'Special':warned?'Flagged':'Decoded','badge'+(warned?' warning':'')));
    const disclosure=el('details'),summary=el('summary','Inspect'),content=el('pre');
    const full=Object.entries(d.values).map(([k,v])=>`${k}: ${String(v)}${d.units[k]?' '+d.units[k]:''}`);
-   content.textContent=[`Encoding: ${d.encoding}`,`Bytes: ${d.hex}`,d.status===null?'':`Measurement status: 0x${d.status.toString(16).padStart(4,'0')}`,d.measurementCount==null?'':`Measurement count: ${d.measurementCount}`,...full,...d.flags,...d.warnings,...d.diagnostics].filter(Boolean).join('\n');disclosure.append(summary,content);details.append(disclosure);
+   content.textContent=[`Protocol edition: ${d.profile==='japanese'?'Japanese (legacy)':'English (current)'}`,`Encoding: ${d.encoding}`,`Bytes: ${d.hex}`,d.status===null?'':`Measurement status: 0x${d.status.toString(16).padStart(4,'0')}`,d.measurementCount==null?'':`Measurement count: ${d.measurementCount}`,...full,...d.flags,...d.warnings,...d.diagnostics].filter(Boolean).join('\n');disclosure.append(summary,content);details.append(disclosure);
   }
   tr.append(identity,time,raw,values,details);fragment.append(tr);
  }
@@ -79,7 +79,7 @@ $('decode').onclick=async()=>{
  if(busy)return;setBusy(true);message('Decoding input locally…');
  const mode=$('importMode').value;
  try {
-  const result=await request({text:loadedText??$('input').value,options:{source,encoding:$('encoding').value,model:$('model').value,timestampColumn:$('timestampColumn').value.trim()||'auto',timestampFormat:$('timestampFormat').value}});
+  const result=await request({text:loadedText??$('input').value,options:{source,encoding:$('encoding').value,model:$('model').value,profile:$('profile').value,timestampColumn:$('timestampColumn').value.trim()||'auto',timestampFormat:$('timestampFormat').value}});
   rows=mode==='append'?[...rows,...result.rows]:result.rows;markDuplicates(rows);if(!rows.some(r=>r.time!==null))$('axis').value='sample';page=0;refreshFields(mode==='append');render();persistCurrent();
   const errors=rows.filter(r=>r.error).length,tsErrors=rows.filter(r=>r.timestampError).length;
   message(`${rows.length.toLocaleString()} rows loaded · ${rows.filter(r=>r.decoded).length.toLocaleString()} decoded${errors?` · ${errors.toLocaleString()} payload issues`:''}${tsErrors?` · ${tsErrors} timestamp issues`:''}. Original order retained.`,errors||tsErrors?'':'success');
@@ -89,8 +89,9 @@ $('input').oninput=()=>{loadedText=null;source='Pasted input';$('source').textCo
 $('file').onchange=async()=>{const file=$('file').files[0];if(!file)return;try{message('Reading file locally…');const text=await file.text();loadedText=text;$('input').value=text.slice(0,8000);$('input').readOnly=text.length>8000;source=file.name;$('source').textContent=`${file.name} · ${(file.size/1024).toFixed(1)} KB · ready to decode${text.length>8000?' · preview truncated; full file will decode':''}`;updateColumnHints();message('File ready. Choose settings, then Decode input.');}catch(e){message(`Could not read file: ${e.message}`,'error');}finally{$('file').value='';}};
 $('pasteMode').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input').value='';source='Pasted input';$('source').textContent='Pasted input · CSV payload header must be named data';$('input').focus();};
 $('example').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input').value='data,ts\nEAAANmFADE8w,2026-10-06 (09:00:00.000)\nEQAASRJA4058,2026-10-06 (09:15:00.000)\nEAAANmFADE8w,2026-10-06 (09:30:00.000)';source='Example';$('source').textContent='Example · three packets including one repeated payload';updateColumnHints();message('Example ready. Select Decode input.');};
-$('model').onchange=()=>{for(const r of rows)if(r.decoded?.type===0x41){try{r.decoded=decode(r.raw,{encoding:r.decoded.encoding,model:$('model').value});}catch(e){r.error=e.message;}}render();persistCurrent();};
-for(const id of settingIDs.filter(id=>id!=='model'))$(id).onchange=()=>{render();persistCurrent();};
+function reinterpretRows(all=false){for(const r of rows)if(r.decoded&&(all||r.decoded.type===0x41)){try{r.decoded=decode(r.raw,{encoding:r.decoded.encoding,model:$('model').value,profile:$('profile').value});}catch(e){r.error=e.message;}}render();persistCurrent();}
+$('model').onchange=()=>reinterpretRows();$('profile').onchange=()=>reinterpretRows(true);
+for(const id of settingIDs.filter(id=>id!=='model'&&id!=='profile'))$(id).onchange=()=>{render();persistCurrent();};
 const resetTablePage=()=>{page=0;renderTable();};$('rowFilter').onchange=resetTablePage;$('dataFilter').onchange=resetTablePage;
 let searchTimer;$('tableSearch').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(resetTablePage,150);};
 $('resetFilters').onclick=()=>{clearTimeout(searchTimer);$('rowFilter').value='all';$('dataFilter').value='all';$('tableSearch').value='';resetTablePage();};
@@ -99,7 +100,7 @@ $('pageInput').oninput=()=>{$('pageInput').setCustomValidity('');};
 $('pageJump').onsubmit=event=>{event.preventDefault();const input=$('pageInput'),value=Number(input.value),pages=Math.ceil(filteredRows().length/PAGE_SIZE);if(!Number.isInteger(value)||value<1||value>pages){input.setCustomValidity(`Enter a page from 1 to ${Math.max(1,pages)}.`);input.reportValidity();return;}page=value-1;renderTable();};
 function setSelection(all){selected=new Set(all?fields:[]);for(const box of $('series').querySelectorAll('input'))box.checked=all;renderCharts();persistCurrent();}
 $('selectAll').onclick=()=>setSelection(true);$('selectNone').onclick=()=>setSelection(false);
-$('export').onclick=async()=>{if(busy||!rows.length)return;$('export').disabled=true;try{message('Preparing CSV locally…');const {csv}=await request({action:'export',rows});const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=el('a');a.href=url;a.download='decoded-payloads.csv';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);message('CSV exported with native units and full decoded precision.','success');}catch(e){message(`Export failed: ${e.message}`,'error');}finally{$('export').disabled=!rows.length;}};
+$('export').onclick=async()=>{if(busy||!rows.length)return;$('export').disabled=true;try{message('Preparing CSV locally…');const {csv}=await request({action:'export',rows});const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=el('a');a.href=url;a.download='decoded-payloads.csv';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);message('CSV exported with decoded values, units and full precision.','success');}catch(e){message(`Export failed: ${e.message}`,'error');}finally{$('export').disabled=!rows.length;}};
 $('clear').onclick=()=>{rows=[];page=0;refreshFields();render();persistCurrent();message('Current dataset cleared.');};
 function queueClear(){storageQueue=storageQueue.catch(()=>{}).then(clearDataset).then(()=>{$('storageStatus').textContent=$('persist').checked?'Saved dataset cleared. Future changes will be remembered.':'Storage off · saved dataset removed.';}).catch(e=>{$('storageStatus').textContent=`Could not clear saved data: ${e.message}`;});}
 $('persist').onchange=()=>{try{if($('persist').checked){localStorage.setItem('payload-decoder-remember','1');persistCurrent();}else{localStorage.removeItem('payload-decoder-remember');queueClear();}}catch(e){$('persist').checked=false;$('storageStatus').textContent=`Browser storage unavailable: ${e.message}`;}};

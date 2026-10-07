@@ -20,6 +20,11 @@ for (let channel=1; channel<=4; channel++) {
  diagnosticMaps.XS540[1][bit-1]=`Sensor ${channel} vibration outside specification`;
  diagnosticMaps.XS540[1][bit-2]=`Sensor ${channel} temperature outside specification`;
 }
+const legacyDiagnosticMaps=Object.fromEntries(['XS770A','XS530','XS550'].map(model=>[model,diagnosticMaps[model].map(map=>({...map}))]));
+delete legacyDiagnosticMaps.XS770A[0][27];delete legacyDiagnosticMaps.XS770A[0][26];
+legacyDiagnosticMaps.XS770A[0][25]='Installation or calibration problem';
+legacyDiagnosticMaps.XS770A[1][27]='RF circuit electrical failure';legacyDiagnosticMaps.XS770A[1][26]='NFC electrical failure';
+for(const model of ['XS530','XS550']){delete legacyDiagnosticMaps[model][0][11];delete legacyDiagnosticMaps[model][1][19];}
 function describeBits(word,map,label) {
  const result=[];
  for(let bit=31;bit>=0;bit--) if((word>>>bit)&1) result.push(`${label} bit ${bit}: ${map[bit] || `Unknown ${label.toLowerCase()} bit ${bit}`}`);
@@ -41,12 +46,13 @@ function bytesFrom(text,encoding) {
  if(btoa(decoded).replace(/=+$/,'')!==clean.replace(/=+$/,'')) throw Error('Invalid Base64 trailing bits');
  return Uint8Array.from(decoded,c=>c.charCodeAt(0));
 }
-export function decode(payload,{encoding='auto',model='Unknown'}={}) {
+export function decode(payload,{encoding='auto',model='Unknown',profile='english'}={}) {
  if(typeof payload!=='string') throw Error('Payload must be text');
  if(!['auto','hex','base64'].includes(encoding)) throw Error('Unknown encoding');
+ if(!['english','japanese'].includes(profile))throw Error('Unknown protocol profile');
  if(encoding==='auto') {
   const candidates=[]; const errors=[];
-  for(const mode of ['hex','base64']) {try {candidates.push(decode(payload,{encoding:mode,model}));}catch(e){errors.push(e.message);}}
+  for(const mode of ['hex','base64']) {try {candidates.push(decode(payload,{encoding:mode,model,profile}));}catch(e){errors.push(e.message);}}
   if(candidates.length===2) throw Error('Ambiguous encoding: choose Hex or Base64');
   if(candidates.length===1) return candidates[0];
   if(!payload.trim()) throw Error('Missing payload');
@@ -54,7 +60,7 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
  }
  const b=bytesFrom(payload,encoding), d=new DataView(b.buffer);
  const type=b[0]===0x80 && b.length>=2?d.getUint16(0):b[0];
- const r={type,label:'',hex:Array.from(b,x=>x.toString(16).padStart(2,'0')).join(' '),encoding,values:{},units:{},status:null,flags:[],invalidFields:[],overrangeFields:[],diagnostics:[],warnings:[]};
+ const r={type,label:'',hex:Array.from(b,x=>x.toString(16).padStart(2,'0')).join(' '),encoding,profile,values:{},units:{},status:null,flags:[],invalidFields:[],overrangeFields:[],diagnostics:[],warnings:[]};
  // Recognize only the supplied sequence; without frame metadata, do not guess other MAC messages.
  if(r.hex.replaceAll(' ','')==='03200100710320ff000103200000410400050868e28c') {
   r.special=true;r.label='Special network-control sequence';
@@ -73,7 +79,8 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
  const add=(name,value,unit='')=>{r.values[name]=value;r.units[name]=unit;if(typeof value==='number'&&!Number.isFinite(value)){r.warnings.push(`${name}: nonfinite value (${String(value)})`);r.invalidFields.push(name);}};
  const measured=(fields,trap=false,shared=false)=>{
   r.status=d.getUint16(trap?2:1);
-  let known=0x100|(trap?0:7); r.measurementCount=trap?null:r.status&7;
+  const legacy=profile==='japanese'&&[0x10,0x11,0x12,0x13,0x20,0x21,0x30,0x31].includes(type);
+  let known=0x100|(trap||legacy?0:7); r.measurementCount=trap||legacy?null:r.status&7;
   fields.forEach((name,i)=>{
    const err=shared?15:15-i,over=shared?12:12-i;
    known|=(1<<err)|(1<<over);
@@ -84,14 +91,21 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
   const unknown=r.status & ~known & 0xffff;
   if(unknown)r.warnings.push(`Reserved status bits set: 0x${unknown.toString(16).padStart(4,'0')}`);
  };
- if(type>=0x10&&type<=0x13) {
+ if(type===0x00) {
+  length(9);r.label='Display unit codes (legacy)';
+  add('TemperatureDisplayUnitCode',d.getUint16(1));add('VoltageDisplayUnitCode',d.getUint16(3));add('PressureDisplayUnitCode',d.getUint16(5));add('ReservedDisplayUnitWord',d.getUint16(7));
+  r.warnings.push('Unit-code names are not defined in the compared manuals; raw codes are preserved without assigning units.');
+  if(r.values.ReservedDisplayUnitWord!==0xffff)r.warnings.push('Reserved display-unit word differs from the documented 0xFFFF.');
+  r.diagnostics.push('Temperature code: bytes 1–2; voltage code: bytes 3–4; pressure code: bytes 5–6; reserved word: bytes 7–8. This metadata does not automatically change displayed measurement units.');
+ } else if(type>=0x10&&type<=0x13) {
   const axis=['Z','XYZ','X','Y'][type-0x10]; const n=type<=0x11?3:2;
   length(n===3?9:7);r.label=`${axis} vibration`;
   const fields=['Acceleration','Velocity','Temperature'].slice(0,n).map(x=>axis+x);
   fields.forEach((name,i)=>add(name,float16(d.getUint16(3+i*2)),['m/s²','mm/s','°C'][i]));measured(fields);
  } else if([0x20,0x21,0x30,0x31].includes(type)) {
   length(7); const name={32:'Temperature1',33:'Temperature2',48:'Pressure',49:'Temperature3'}[type];r.label=name;
-  add(name,d.getFloat32(3),type===0x30?'MPa':'°C');measured([name]);
+  add(name,d.getFloat32(3),profile==='japanese'?(type===0x30?'device pressure unit':'device temperature unit'):(type===0x30?'MPa':'°C'));measured([name]);
+  if(profile==='japanese')r.warnings.push('Legacy transmitted units are configurable. Confirm device settings; display-unit code mappings are not defined in the compared manuals. Values are shown in device units without conversion.');
  } else if(type>=0x51&&type<=0x58) {
   length(9);const ch=Math.floor((type-0x51)/2)+1,extended=type%2===0;
   r.label=`Channel ${ch} ${extended?'extended':'basic'} vibration`;
@@ -112,7 +126,9 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
   if(b[4]>200)r.warnings.push('Battery value exceeds 100%');if(b[6]>100)r.warnings.push('Packet error rate exceeds 100%');
  } else if(type===0x41) {
   length(9);r.label='Diagnostics';add('DiagnosticStatus',d.getUint32(1));add('DiagnosticDetail',d.getUint32(5));
-  const maps=diagnosticMaps[model]||[{31:'Failure',30:'Function check',29:'Out of specification',28:'Maintenance required'},{}];
+  const chosenMaps=profile==='japanese'&&legacyDiagnosticMaps[model]?legacyDiagnosticMaps[model]:diagnosticMaps[model];
+  if(profile==='japanese'&&['XS822','XS540'].includes(model))r.warnings.push('This model is not covered by the Japanese legacy edition; English diagnostic definitions are used.');
+  const maps=chosenMaps||[{31:'Failure',30:'Function check',29:'Out of specification',28:'Maintenance required'},{}];
   r.diagnostics=[...describeBits(r.values.DiagnosticStatus,maps[0],'Status'),...describeBits(r.values.DiagnosticDetail,maps[1],'Detail')];
   const status=r.values.DiagnosticStatus,detail=r.values.DiagnosticDetail;
   const hex=word=>'0x'+word.toString(16).padStart(8,'0');
@@ -137,7 +153,7 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
  for(const [name,value] of Object.entries(r.values))if(/Longitude|Latitude/.test(name)&&Number.isFinite(value)&&Math.abs(value)>(name.includes('Longitude')?180:90)){r.warnings.push(`${name}: coordinate outside valid range`);r.invalidFields.push(name);}
  return r;
 }
-export function isChartable(name,value) {return typeof value==='number'&&!['DiagnosticStatus','DiagnosticDetail','VendorID','DeviceType','DeviceRevision'].includes(name);}
+export function isChartable(name,value) {return typeof value==='number'&&!['DiagnosticStatus','DiagnosticDetail','VendorID','DeviceType','DeviceRevision','TemperatureDisplayUnitCode','VoltageDisplayUnitCode','PressureDisplayUnitCode','ReservedDisplayUnitWord'].includes(name);}
 export function convertValue(value,unit,{temperature='native',pressure='native'}={}) {
  if(unit==='°C'&&temperature==='fahrenheit')return [value*9/5+32,'°F'];
  if(unit==='MPa'&&pressure!=='native')return [value*(pressure==='bar'?10:145.03773773020923),pressure==='bar'?'bar':'psi'];
