@@ -113,7 +113,8 @@ export const DATA_GROUPS = {
  trap:['Trap condition',name=>name.startsWith('TrapCondition')],
  equipment:['Equipment',name=>['VendorID','DeviceType','DeviceRevision'].includes(name)],
  initialization:['Initialization',name=>name==='TagName'],
- special:['Special messages',name=>name==='SpecialMessage']
+ special:['Special messages',name=>name==='SpecialMessage'],
+ reporting:['Reporting interval',name=>name==='TransmissionInterval']
 };
 export function matchesDataKind(row,kind='all') {
  if(kind==='all')return true;

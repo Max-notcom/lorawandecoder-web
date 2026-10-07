@@ -51,6 +51,7 @@ Charts separate incompatible units. Measurement-error values are excluded by def
 | `0x20`, `0x21` | Temperature channels |
 | `0x30`, `0x31` | Pressure and temperature |
 | `0x40`–`0x47` | Health, diagnostics, initialization, GPS, and equipment |
+| `0x48` | Legacy transmission interval (minutes) |
 | `0x51`–`0x58` | Basic/extended vibration channels |
 | `0x8000`, `0x8001` | Trap condition and temperature |
 
@@ -85,3 +86,9 @@ This repository contains the runtime assets and this README. Development tests a
 ## Diagnostic reports
 
 `QQAAAAAAAAAA` decodes to `41 00 00 00 00 00 00 00 00`: a diagnostic packet with status and detail words both `0x00000000`. It reports no active diagnostic bits. Inspect shows each raw word and the four category bits: Failure, Function check, Out of specification, and Maintenance required. Select a sensor model to interpret nonzero model-specific bits. Zero words do not require a model and do not establish overall equipment health.
+
+## Legacy transmission interval
+
+`SAAAAAo=` decodes to `48 00 00 00 0A`. Packet type `0x48` contains a four-byte unsigned transmission interval: **10 minutes** in this example. The table and CSV expose `TransmissionInterval` in minutes; use the Reporting interval filter to find it. The value can be selected for charts, but it is not used to invent timestamps.
+
+This legacy format is documented for XS530/XS550 in section 7.7, table 7-11 of the [official Japanese software manual](https://web-material3.yokogawa.com/19/25291/files/IM01W06C01-01JA_001.pdf). It is absent from the English manual initially supplied for this project.

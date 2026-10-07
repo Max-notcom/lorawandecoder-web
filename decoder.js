@@ -128,6 +128,9 @@ export function decode(payload,{encoding='auto',model='Unknown'}={}) {
   length(9);r.label='GPS';add('Longitude',d.getFloat32(1),'° longitude');add('Latitude',d.getFloat32(5),'° latitude');
  } else if(type>=0x44&&type<=0x46) {
   length(9);r.label='Precise GPS';const name=['AccurateLongitude','AccurateLatitude','AccurateAltitude'][type-0x44];add(name,d.getFloat64(1),['° longitude','° latitude','m'][type-0x44]);
+ } else if(type===0x48) {
+  length(5);r.label='Transmission interval (legacy)';add('TransmissionInterval',d.getUint32(1),'min');
+  r.diagnostics.push('Legacy transmission-interval format documented for XS530/XS550: type byte followed by an unsigned 32-bit interval in minutes.','This reports the wireless transmission setting; timestamps are not inferred from it.');
  } else if(type===0x47) {
   length(9);r.label='Equipment';add('VendorID',d.getUint32(1));add('DeviceType',d.getUint16(5));add('DeviceRevision',d.getUint16(7));
  } else throw Error(`Unsupported packet type 0x${(type??0).toString(16)}`);
