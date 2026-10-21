@@ -11,3 +11,5 @@
 @media(max-width:760px){.record-summary table{min-width:0;table-layout:fixed}.record-summary th:first-child,.record-summary td:first-child{width:110px;white-space:normal;overflow-wrap:anywhere}.record-summary th:nth-child(2),.record-summary .record-count{width:75px}}
 
 .record-summary .table-scroll{margin-bottom:0}.record-summary th:last-child,.record-percentage{text-align:right;width:105px;font-variant-numeric:tabular-nums}.summary-text{padding-top:16px;font-size:12px}.summary-text p:last-child{margin-bottom:0}@media(max-width:760px){.record-summary th:first-child,.record-summary td:first-child{width:90px}.record-summary th:nth-child(2),.record-summary .record-count{width:60px}.record-summary th:last-child,.record-percentage{width:85px}.record-summary th,.record-summary td{padding-left:8px;padding-right:8px}}
+
+.summary-bar{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:1000px){.summary-bar{grid-template-columns:repeat(3,minmax(0,1fr))}}

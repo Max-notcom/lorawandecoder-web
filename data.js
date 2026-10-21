@@ -189,3 +189,18 @@ export function topContributors(summary) {
  }
  return [...groups].map(([name,count])=>({name,count,percentage:total?count/total*100:0})).sort((a,b)=>b.count-a.count).slice(0,3);
 }
+
+export function countConsecutiveRepeats(rows) {
+ let count=0,previousHex=null,knownDay=null,knownKind=null;
+ for(const row of rows){
+  const hex=row.decoded?.hex;
+  if(!hex||!row.raw?.trim()||row.error){previousHex=null;knownDay=null;knownKind=null;continue;}
+  const day=Number.isFinite(row.time)?(row.timestamp?.trim().match(/^\d{4}-\d{2}-\d{2}/)?.[0]||new Date(row.time).toISOString().slice(0,10)):null;
+  const sameDay=!day||!knownDay||(day===knownDay&&row.timeKind===knownKind);
+  if(hex===previousHex&&sameDay)count++;
+  else{knownDay=null;knownKind=null;}
+  previousHex=hex;
+  if(day){knownDay=day;knownKind=row.timeKind;}
+ }
+ return count;
+}

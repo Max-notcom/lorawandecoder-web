@@ -113,3 +113,9 @@ Set **Raw payload header** before importing a named table (for example `payload`
 The rightmost summary column shows each record type's percentage of all loaded rows, including empty and undecoded records, rounded to one decimal place. A nonempty dataset totals 100%; an empty dataset shows 0%. Rounded rows may not add to exactly 100%.
 
 The text below the table ranks the top three contributors by record count. Vibration types `0x10`–`0x13` and `0x51`–`0x58` count as one Vibration measurements group across all axes/channels. Temperature channels are grouped together, as are geographical-information formats. Each packet counts once, regardless of how many measurement values it contains. The detailed table keeps its individual record-type rows. Fewer than three groups produce a shorter ranking; equal-count groups retain table order.
+
+## Consecutive repeats
+
+The separate Consecutive repeats indicator counts extra adjacent identical decoded payloads in original imported order. `A, A, A` counts as two repeats; `A, B, A` counts as zero. It compares normalized bytes, so equivalent Base64 and hexadecimal representations match. Empty/undecodable rows break a sequence. Known calendar-date changes also break it; ISO timestamps retain their recorded calendar date, while epoch timestamps use UTC. Mixed wall-clock/offset-aware date bases are not joined when both dates are known. A known date is retained across undated rows within the same run.
+
+The existing repeated-payload-row count still counts all occurrences of any duplicated payload anywhere in the dataset. Neither indicator deletes rows or changes filters, percentages, charts or export. The consecutive count uses the full dataset, including append boundaries, and is recalculated after restore. Without timestamps, only adjacency can be assessed. Identical bytes alone do not establish that a transmission was redundant or retransmitted.
