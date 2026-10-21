@@ -107,3 +107,9 @@ Japanese mode includes the legacy XS770A RF/NFC diagnostic bits and treats the d
 The Record summary table counts the full loaded dataset by packet type and explains each type. GPS types `0x44`–`0x46` are grouped. Special messages, empty records, and other undecoded payloads have separate counts; Total counts every imported row once. A constant transmission interval is shown in minutes. Unsupported and malformed records remain inspectable in the decoded-data table. Filters and pagination do not alter summary counts.
 
 Set **Raw payload header** before importing a named table (for example `payload`, `raw message`, or `RawFrame`). Column suggestions come from the input header. Missing or duplicate matching headers produce an import error, and row errors identify the selected column. Plain payload lists still work. The Load example button uses the default `data` header. Optional browser storage remembers the header setting, and CSV exports preserve the source header name in PayloadColumn while using RawPayload for the encoded data.
+
+## Summary percentages and contributors
+
+The rightmost summary column shows each record type's percentage of all loaded rows, including empty and undecoded records, rounded to one decimal place. A nonempty dataset totals 100%; an empty dataset shows 0%. Rounded rows may not add to exactly 100%.
+
+The text below the table ranks the top three contributors by record count. Vibration types `0x10`–`0x13` and `0x51`–`0x58` count as one Vibration measurements group across all axes/channels. Temperature channels are grouped together, as are geographical-information formats. Each packet counts once, regardless of how many measurement values it contains. The detailed table keeps its individual record-type rows. Fewer than three groups produce a shorter ranking; equal-count groups retain table order.

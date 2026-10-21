@@ -174,5 +174,18 @@ export function summarizeRecords(rows) {
  }
  if(groups.has('0x48'))groups.get('0x48').meaning=intervals.size===1?`Reported transmission interval: ${[...intervals][0]} minutes`:'Reported transmission interval in minutes; varies by record';
  const rank=type=>type.startsWith('0x')?parseInt(type.slice(2),16):type==='special'?0x10000:type==='Other undecoded payloads'?0x10001:0x10002;
- return [...groups.values()].sort((a,b)=>rank(a.type)-rank(b.type)).concat({type:'Total',count:rows.length,meaning:''});
+ return [...groups.values()].sort((a,b)=>rank(a.type)-rank(b.type)).concat({type:'Total',count:rows.length,meaning:''}).map(entry=>({...entry,percentage:rows.length?entry.count/rows.length*100:0}));
+}
+
+export function topContributors(summary) {
+ const total=summary.find(row=>row.type==='Total')?.count||0,groups=new Map();
+ const names={0:'Display-unit metadata',32:'Temperature measurements',33:'Temperature measurements',48:'Pressure measurements',49:'Temperature measurements',64:'Device health',65:'Self-diagnostics',66:'Device initialization',67:'Geographical information',68:'Geographical information',71:'Equipment identification',72:'Transmission interval',32768:'Trap condition',32769:'Temperature measurements'};
+ for(const row of summary){
+  if(row.type==='Total')continue;
+  const type=row.type.startsWith('0x')?parseInt(row.type.slice(2),16):null;
+  const vibration=type!==null&&((type>=0x10&&type<=0x13)||(type>=0x51&&type<=0x58));
+  const name=vibration?'Vibration measurements':names[type]||(row.type==='special'?'Special messages':row.type);
+  groups.set(name,(groups.get(name)||0)+row.count);
+ }
+ return [...groups].map(([name,count])=>({name,count,percentage:total?count/total*100:0})).sort((a,b)=>b.count-a.count).slice(0,3);
 }
