@@ -46,27 +46,28 @@ export function detectDelimiter(text) {
  for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){i++;continue;}quoted=!quoted;}else if(!quoted){if(c==='\n'||c==='\r')break;if(c in counts)counts[c]++;}}
  return Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0]&&Math.max(...Object.values(counts))>0?Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0]:null;
 }
-export function parseInput(input,{source='Pasted input',timestampColumn='auto',timestampFormat='auto'}={}) {
+export function parseInput(input,{source='Pasted input',payloadColumn='data',timestampColumn='auto',timestampFormat='auto'}={}) {
+ payloadColumn=payloadColumn.trim()||'data';
  const text=String(input).replace(/^\ufeff/,'');if(!text.trim())throw Error('No input supplied');
  const first=text.split(/\r?\n/).find(s=>s.trim())||'';
  let records,structured=false;
  if(first.trim().startsWith('|')) {
   records=text.split(/\r?\n/).map((s,i)=>({cells:s.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>x.trim()),line:i+1})).filter(r=>r.cells.some(Boolean)&&!r.cells.every(x=>/^:?-+:?$/.test(x)));
-  structured=records[0].cells.some(x=>x==='data')||records[0].cells.length>1;
+  structured=records[0].cells.some(x=>x===payloadColumn)||records[0].cells.length>1;
  } else {
   const delimiter=detectDelimiter(text);records=parseDelimited(text,delimiter||',');
-  structured=!!delimiter||records[0]?.cells[0].trim()==='data';
+  structured=!!delimiter||records[0]?.cells[0].trim()===payloadColumn;
   if(!structured)records=records.filter(r=>r.cells.some(c=>c.trim()));
  }
- let dataIndex=0,timeIndex=-1,headers=['data'];
+ let dataIndex=0,timeIndex=-1,headers=[payloadColumn];
  if(structured) {
   headers=records.shift().cells.map(x=>x.trim());
-  const matches=headers.flatMap((x,i)=>x==='data'?[i]:[]);
-  if(matches.length!==1)throw Error(matches.length?'Duplicate data headers: exactly one data column is required':'Missing data header: CSV/Excel tables require a column named data');
+  const matches=headers.flatMap((x,i)=>x===payloadColumn?[i]:[]);
+  if(matches.length!==1)throw Error(matches.length?`Duplicate ${payloadColumn} headers: exactly one payload column is required`:`Missing ${payloadColumn} header: CSV/Excel tables require a column named ${payloadColumn}`);
   dataIndex=matches[0];
   if(timestampColumn!=='none') {
    if(timestampColumn==='auto') {
-    timeIndex=headers.findIndex(x=>/^(ts|timestamp|time|datetime|date|created_at|received_at)$/i.test(x));
+    timeIndex=headers.findIndex((x,i)=>i!==dataIndex&&/^(ts|timestamp|time|datetime|date|created_at|received_at)$/i.test(x));
     if(timeIndex<0) {
      const candidates=headers.flatMap((h,i)=>{if(i===dataIndex)return [];const vals=records.slice(0,10).map(r=>r.cells[i]).filter(Boolean);if(!vals.length)return [];try {return vals.every(v=>parseTimestamp(v,timestampFormat).time!==null)?[i]:[];}catch{return [];}});
      if(candidates.length===1)timeIndex=candidates[0];
@@ -75,14 +76,14 @@ export function parseInput(input,{source='Pasted input',timestampColumn='auto',t
   }
  }
  return records.map((rec,i)=>{
-  const r={source,row:i+(structured?2:1),line:rec.line,column:'data',raw:rec.cells[dataIndex]??'',timestamp:timeIndex<0?'':rec.cells[timeIndex]??'',time:null,timeKind:null,error:null,timestampError:null};
+  const r={source,row:i+(structured?2:1),line:rec.line,column:payloadColumn,raw:rec.cells[dataIndex]??'',timestamp:timeIndex<0?'':rec.cells[timeIndex]??'',time:null,timeKind:null,error:null,timestampError:null};
   if(structured&&rec.cells.length!==headers.length)r.error=`Column count mismatch at line ${rec.line}: expected ${headers.length}, received ${rec.cells.length}`;
   try{Object.assign(r,parseTimestamp(r.timestamp,timestampFormat));}catch(e){r.timestampError=`Column ${headers[timeIndex]}: ${e.message}`;}
   r.timestampColumn=timeIndex<0?null:headers[timeIndex];return r;
  });
 }
 export function processInput(text,options={}) {
- return parseInput(text,options).map(r=>{if(!r.error){try{r.decoded=decode(r.raw,options);}catch(e){r.error=`Column data: ${e.message}`;}}return r;});
+ return parseInput(text,options).map(r=>{if(!r.error){try{r.decoded=decode(r.raw,options);}catch(e){r.error=`Column ${r.column}: ${e.message}`;}}return r;});
 }
 export function markDuplicates(rows) {
  const counts=new Map();for(const r of rows){if(r.decoded){const key=r.decoded.hex;counts.set(key,(counts.get(key)||0)+1);}}
@@ -96,9 +97,9 @@ const safeCell=value=>{
 export function exportCSV(rows) {
  const fields=[...new Set(rows.flatMap(r=>Object.keys(r.decoded?.values||{})))];
  const fieldInfo=fields.map(name=>{const units=[...new Set(rows.filter(r=>r.decoded&&name in r.decoded.values).map(r=>r.decoded.units[name]||''))];return {name,unit:units[0]||'',mixed:units.length>1};});
- const headers=['Source','SourceRow','SourceLine','Timestamp','TimestampKind','RawPayload','PacketType','ProtocolEdition',...fieldInfo.flatMap(({name,unit,mixed})=>mixed?[`${name} (mixed units)`,name+'Unit']:[unit?`${name} (${unit})`:name]),'MeasurementStatus','Flags','Warnings','Diagnostics','Error','TimestampError'];
+ const headers=['Source','SourceRow','SourceLine','PayloadColumn','Timestamp','TimestampKind','RawPayload','PacketType','ProtocolEdition',...fieldInfo.flatMap(({name,unit,mixed})=>mixed?[`${name} (mixed units)`,name+'Unit']:[unit?`${name} (${unit})`:name]),'MeasurementStatus','Flags','Warnings','Diagnostics','Error','TimestampError'];
  const lines=[headers.map(safeCell).join(',')];
- for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.timestamp,r.timeKind,r.raw,d?(d.special?'special':`0x${d.type.toString(16)}`):'',d?(d.profile||'english'):'',...fieldInfo.flatMap(({name,mixed})=>mixed?[d?.values[name]??'',d?.units[name]||'']:[d?.values[name]??'']),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
+ for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.column||'data',r.timestamp,r.timeKind,r.raw,d?(d.special?'special':`0x${d.type.toString(16)}`):'',d?(d.profile||'english'):'',...fieldInfo.flatMap(({name,mixed})=>mixed?[d?.values[name]??'',d?.units[name]||'']:[d?.values[name]??'']),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
  return '\ufeff'+lines.join('\r\n');
 }
 
@@ -144,4 +145,34 @@ export function pageNumbers(total,current) {
  const values=[...new Set([1,total,...Array.from({length:5},(_,i)=>page+i-2).filter(p=>p>=1&&p<=total)])].sort((a,b)=>a-b),result=[];
  for(const value of values){if(result.length&&value-result.at(-1)>1)result.push(null);result.push(value);}
  return result;
+}
+
+export function summarizeRecords(rows) {
+ const groups=new Map(),intervals=new Set();
+ const meanings={
+  '0x00':'Display-unit metadata codes',
+  '0x10':'Z-axis acceleration, velocity and temperature measurements',
+  '0x11':'Composite acceleration, velocity and temperature measurements',
+  '0x12':'X-axis acceleration and velocity measurements',
+  '0x13':'Y-axis acceleration and velocity measurements',
+  '0x40':'Device health: uptime, battery, RSSI, PER and SNR',
+  '0x41':'Self-diagnostic status',
+  '0x42':'Device initialization and tag name',
+  '0x43':'GPS coordinates',
+  '0x44–0x46':'Stored geographical information: longitude, latitude and altitude',
+  '0x47':'Equipment identification',
+  'special':'Possible LoRaWAN MAC-command sequence (unconfirmed)',
+  'Other undecoded payloads':'Unsupported payloads or invalid input; inspect row errors',
+  'Empty records':'No payload recorded'
+ };
+ for(const row of rows){
+  const d=row.decoded;
+  const type=!row.raw?.trim()?'Empty records':!d?'Other undecoded payloads':d.special?'special':d.type>=0x44&&d.type<=0x46?'0x44–0x46':`0x${d.type.toString(16).padStart(2,'0')}`;
+  if(!groups.has(type))groups.set(type,{type,count:0,meaning:meanings[type]||d?.label||'Decoded record'});
+  groups.get(type).count++;
+  if(d?.type===0x48)intervals.add(d.values.TransmissionInterval);
+ }
+ if(groups.has('0x48'))groups.get('0x48').meaning=intervals.size===1?`Reported transmission interval: ${[...intervals][0]} minutes`:'Reported transmission interval in minutes; varies by record';
+ const rank=type=>type.startsWith('0x')?parseInt(type.slice(2),16):type==='special'?0x10000:type==='Other undecoded payloads'?0x10001:0x10002;
+ return [...groups.values()].sort((a,b)=>rank(a.type)-rank(b.type)).concat({type:'Total',count:rows.length,meaning:''});
 }

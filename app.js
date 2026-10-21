@@ -1,11 +1,11 @@
 import {decode,isChartable,convertValue} from './decoder.js';
-import {markDuplicates,parseDelimited,detectDelimiter,filterRows,pageNumbers,DATA_GROUPS,matchesDataKind} from './data.js';
+import {markDuplicates,parseDelimited,detectDelimiter,filterRows,pageNumbers,DATA_GROUPS,matchesDataKind,summarizeRecords} from './data.js';
 import {drawCharts} from './charts.js';
 import {saveDataset,loadDataset,clearDataset} from './storage.js';
 const $=id=>document.getElementById(id);
 let rows=[],selected=new Set(),fields=[],page=0,source='Pasted input',busy=false,restoring=false,loadedText=null,disposeCharts=()=>{},worker=null,job=0,storageQueue=Promise.resolve();
 const pending=new Map();const PAGE_SIZE=50;
-const settingIDs=['model','profile','temperature','pressure','axis','highlight','includeErrors','hideOverrange','hideSimulation'];
+const settingIDs=['payloadColumn','model','profile','temperature','pressure','axis','highlight','includeErrors','hideOverrange','hideSimulation'];
 const getSettings=()=>Object.fromEntries(settingIDs.map(id=>[id,$(id).type==='checkbox'?$(id).checked:$(id).value]));
 const message=(text,type='')=>{$('message').textContent=text;$('message').className='message '+type;};
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node;};
@@ -72,26 +72,27 @@ function renderTable(){
  $('tbody').replaceChildren(fragment);$('pageInfo').textContent=view.length?`${page*PAGE_SIZE+1}–${Math.min((page+1)*PAGE_SIZE,view.length)} of ${view.length.toLocaleString()} rows · page ${page+1}/${pages}`:'0 rows';$('prev').disabled=page===0;$('next').disabled=page>=pages-1;
  const buttons=pageNumbers(pages,page).map(number=>{if(number===null)return el('span','…','muted');const button=el('button',String(number),'small');button.type='button';button.setAttribute('aria-label',`Page ${number}`);if(number===page+1)button.setAttribute('aria-current','page');button.onclick=()=>{page=number-1;renderTable();$('pageNumbers').querySelector('[aria-current=page]')?.focus();};return button;});$('pageNumbers').replaceChildren(...buttons);$('pageInput').max=Math.max(1,pages);$('pageInput').value=page+1;$('pageInput').disabled=!pages;$('goPage').disabled=!pages;$('pageInput').setCustomValidity('');
 }
-function renderSummary(){const valid=rows.filter(r=>r.decoded).length,issues=rows.filter(r=>r.error||r.timestampError||r.decoded?.flags.length||r.decoded?.warnings.length).length;for(const [id,n] of [['total',rows.length],['valid',valid],['errors',issues],['duplicates',rows.filter(r=>r.duplicate).length]])$(id).textContent=n.toLocaleString();$('export').disabled=busy||!rows.length;}
+function renderSummary(){const valid=rows.filter(r=>r.decoded).length,issues=rows.filter(r=>r.error||r.timestampError||r.decoded?.flags.length||r.decoded?.warnings.length).length;for(const [id,n] of [['total',rows.length],['valid',valid],['errors',issues],['duplicates',rows.filter(r=>r.duplicate).length]])$(id).textContent=n.toLocaleString();$('export').disabled=busy||!rows.length;const fragment=document.createDocumentFragment();for(const entry of summarizeRecords(rows)){const tr=el('tr');if(entry.type==='Total')tr.className='summary-total';tr.append(el('td',entry.type),el('td',entry.count.toLocaleString(),'record-count'),el('td',entry.meaning));fragment.append(tr);}$('recordSummary').replaceChildren(fragment);}
 function render(){renderSummary();renderCharts();renderTable();}
-function updateColumnHints(){const first=$('input').value.replace(/^\ufeff/,'').split(/\r?\n/)[0]||'';if(!detectDelimiter(first))return;try{const headers=parseDelimited(first,detectDelimiter(first))[0]?.cells||[];$('columns').replaceChildren(...['auto','none',...headers.map(h=>h.trim()).filter(h=>h&&h!=='data')].map(v=>{const o=el('option');o.value=v;return o;}));}catch{/* Full import reports malformed input. */}}
+function updateColumnHints(){const first=$('input').value.replace(/^\ufeff/,'').split(/\r?\n/)[0]||'';try{const headers=first.trim().startsWith('|')?first.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(h=>h.trim()):parseDelimited(first,detectDelimiter(first)||',')[0]?.cells.map(h=>h.trim())||[];if(!detectDelimiter(first)&&!first.trim().startsWith('|')&&headers[0]!==$('payloadColumn').value.trim())return;for(const [id,values] of [['payloadColumns',['data',...headers]],['columns',['auto','none',...headers.filter(h=>h!==$('payloadColumn').value.trim())]]])$(id).replaceChildren(...[...new Set(values.filter(Boolean))].map(v=>{const option=el('option');option.value=v;return option;}));}catch{/* Full import reports malformed headers. */}}
 $('decode').onclick=async()=>{
  if(busy)return;setBusy(true);message('Decoding input locally…');
  const mode=$('importMode').value;
  try {
-  const result=await request({text:loadedText??$('input').value,options:{source,encoding:$('encoding').value,model:$('model').value,profile:$('profile').value,timestampColumn:$('timestampColumn').value.trim()||'auto',timestampFormat:$('timestampFormat').value}});
+  const result=await request({text:loadedText??$('input').value,options:{source,payloadColumn:$('payloadColumn').value.trim()||'data',encoding:$('encoding').value,model:$('model').value,profile:$('profile').value,timestampColumn:$('timestampColumn').value.trim()||'auto',timestampFormat:$('timestampFormat').value}});
   rows=mode==='append'?[...rows,...result.rows]:result.rows;markDuplicates(rows);if(!rows.some(r=>r.time!==null))$('axis').value='sample';page=0;refreshFields(mode==='append');render();persistCurrent();
   const errors=rows.filter(r=>r.error).length,tsErrors=rows.filter(r=>r.timestampError).length;
   message(`${rows.length.toLocaleString()} rows loaded · ${rows.filter(r=>r.decoded).length.toLocaleString()} decoded${errors?` · ${errors.toLocaleString()} payload issues`:''}${tsErrors?` · ${tsErrors} timestamp issues`:''}. Original order retained.`,errors||tsErrors?'':'success');
  }catch(e){message(`${e.message}. The previous dataset has been kept.`, 'error');}finally{setBusy(false);}
 };
-$('input').oninput=()=>{loadedText=null;source='Pasted input';$('source').textContent='Pasted input · CSV payload header must be named data';updateColumnHints();};
+$('input').oninput=()=>{loadedText=null;source='Pasted input';$('source').textContent='Pasted input · CSV/Excel uses the header selected below';updateColumnHints();};
 $('file').onchange=async()=>{const file=$('file').files[0];if(!file)return;try{message('Reading file locally…');const text=await file.text();loadedText=text;$('input').value=text.slice(0,8000);$('input').readOnly=text.length>8000;source=file.name;$('source').textContent=`${file.name} · ${(file.size/1024).toFixed(1)} KB · ready to decode${text.length>8000?' · preview truncated; full file will decode':''}`;updateColumnHints();message('File ready. Choose settings, then Decode input.');}catch(e){message(`Could not read file: ${e.message}`,'error');}finally{$('file').value='';}};
-$('pasteMode').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input').value='';source='Pasted input';$('source').textContent='Pasted input · CSV payload header must be named data';$('input').focus();};
-$('example').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input').value='data,ts\nEAAANmFADE8w,2026-10-06 (09:00:00.000)\nEQAASRJA4058,2026-10-06 (09:15:00.000)\nEAAANmFADE8w,2026-10-06 (09:30:00.000)';source='Example';$('source').textContent='Example · three packets including one repeated payload';updateColumnHints();message('Example ready. Select Decode input.');};
+$('pasteMode').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input').value='';source='Pasted input';$('source').textContent='Pasted input · CSV/Excel uses the header selected below';$('input').focus();};
+$('example').onclick=()=>{$('payloadColumn').value='data';loadedText=null;$('input').readOnly=false;$('input').value='data,ts\nEAAANmFADE8w,2026-10-06 (09:00:00.000)\nEQAASRJA4058,2026-10-06 (09:15:00.000)\nEAAANmFADE8w,2026-10-06 (09:30:00.000)';source='Example';$('source').textContent='Example · three packets including one repeated payload';updateColumnHints();message('Example ready. Select Decode input.');};
 function reinterpretRows(all=false){for(const r of rows)if(r.decoded&&(all||r.decoded.type===0x41)){try{r.decoded=decode(r.raw,{encoding:r.decoded.encoding,model:$('model').value,profile:$('profile').value});}catch(e){r.error=e.message;}}render();persistCurrent();}
 $('model').onchange=()=>reinterpretRows();$('profile').onchange=()=>reinterpretRows(true);
-for(const id of settingIDs.filter(id=>id!=='model'&&id!=='profile'))$(id).onchange=()=>{render();persistCurrent();};
+for(const id of settingIDs.filter(id=>id!=='model'&&id!=='profile'&&id!=='payloadColumn'))$(id).onchange=()=>{render();persistCurrent();};
+$('payloadColumn').onchange=()=>{if(!$('payloadColumn').value.trim())$('payloadColumn').value='data';updateColumnHints();persistCurrent();};
 const resetTablePage=()=>{page=0;renderTable();};$('rowFilter').onchange=resetTablePage;$('dataFilter').onchange=resetTablePage;
 let searchTimer;$('tableSearch').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(resetTablePage,150);};
 $('resetFilters').onclick=()=>{clearTimeout(searchTimer);$('rowFilter').value='all';$('dataFilter').value='all';$('tableSearch').value='';resetTablePage();};

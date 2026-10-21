@@ -18,7 +18,7 @@ A static browser tool for decoding LoRaWAN sensor payloads and inspecting measur
 
 ## Import data
 
-For CSV or pasted spreadsheet tables, the payload header must be named `data`. Its column position can change. Other imported measurement columns are ignored; values are decoded from the payload itself.
+For CSV, pasted spreadsheet cells or Markdown tables, set **Raw payload header** to the name of the column containing encoded payloads. It defaults to `data`; column position can change. Header names are case-sensitive, with surrounding whitespace ignored. Other imported measurement columns are ignored; values are decoded from the payload itself.
 
 ```csv
 data,ts
@@ -101,3 +101,9 @@ Settings → Protocol edition selects **English (current)** or **Japanese (legac
 The Japanese first edition additionally documents `0x00` display-unit metadata: three UINT16 codes for temperature, voltage and pressure, followed by a reserved UINT16 word expected to be `FFFF`. Inspect shows the raw codes. Use **Data type → Display unit codes** to find them. Code enums are not provided by the compared manuals, so the tool does not guess their unit names or plot them as measurements.
 
 Japanese mode includes the legacy XS770A RF/NFC diagnostic bits and treats the documented reserved bits separately from newer firmware-update/counter meanings. Legacy temperature-module and pressure units can be configured on the device; readings use explicit device-unit labels without conversion. CSV includes ProtocolEdition and per-row units when a field has mixed units. The newer English XS822/XS540 definitions remain available.
+
+## Record summary and custom payload headers
+
+The Record summary table counts the full loaded dataset by packet type and explains each type. GPS types `0x44`–`0x46` are grouped. Special messages, empty records, and other undecoded payloads have separate counts; Total counts every imported row once. A constant transmission interval is shown in minutes. Unsupported and malformed records remain inspectable in the decoded-data table. Filters and pagination do not alter summary counts.
+
+Set **Raw payload header** before importing a named table (for example `payload`, `raw message`, or `RawFrame`). Column suggestions come from the input header. Missing or duplicate matching headers produce an import error, and row errors identify the selected column. Plain payload lists still work. The Load example button uses the default `data` header. Optional browser storage remembers the header setting, and CSV exports preserve the source header name in PayloadColumn while using RawPayload for the encoded data.
