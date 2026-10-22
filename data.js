@@ -128,12 +128,13 @@ export function matchesDataKind(row,kind='all') {
  return mode==='field'?names.includes(value):mode==='group'&&!!DATA_GROUPS[value]&&names.some(DATA_GROUPS[value][1]);
 }
 export function filterRows(rows,{status='all',kind='all',query=''}={}) {
- const search=query.trim().toLowerCase();
+ const search=query.trim().toLowerCase(),continuous=status==='continuous'?continuousDuplicates(rows).indices:null;
  if(status==='all'&&kind==='all'&&!search)return rows;
- return rows.filter(row=>{
+ return rows.filter((row,index)=>{
   const d=row.decoded;
   if(status==='issues'&&!(row.error||row.timestampError||d?.flags.length||d?.warnings.length))return false;
   if(status==='duplicates'&&!row.duplicate)return false;
+  if(continuous&&!continuous.has(index))return false;
   if(!matchesDataKind(row,kind))return false;
   if(!search)return true;
   return [row.raw,row.source,row.row,row.timestamp,row.error,row.timestampError,d?.label,d?(d.special?'special':`0x${d.type.toString(16)}`):'',...Object.entries(d?.values||{}).map(([name,value])=>`${name} ${String(value)}`),...(d?.flags||[]),...(d?.warnings||[]),...(d?.diagnostics||[])].join(' ').toLowerCase().includes(search);
@@ -190,17 +191,23 @@ export function topContributors(summary) {
  return [...groups].map(([name,count])=>({name,count,percentage:total?count/total*100:0})).sort((a,b)=>b.count-a.count).slice(0,3);
 }
 
-export function countConsecutiveRepeats(rows) {
- let count=0,previousHex=null,knownDay=null,knownKind=null;
- for(const row of rows){
-  const hex=row.decoded?.hex;
-  if(!hex||!row.raw?.trim()||row.error){previousHex=null;knownDay=null;knownKind=null;continue;}
+export function continuousDuplicates(rows) {
+ const indices=new Set();let repeats=0,payloadCount=0,previousHex=null,previousIndex=-1,knownDay=null,knownKind=null,runLength=0;
+ for(let index=0;index<rows.length;index++){
+  const row=rows[index],hex=row.decoded?.hex;
   const day=Number.isFinite(row.time)?(row.timestamp?.trim().match(/^\d{4}-\d{2}-\d{2}/)?.[0]||new Date(row.time).toISOString().slice(0,10)):null;
-  const sameDay=!day||!knownDay||(day===knownDay&&row.timeKind===knownKind);
-  if(hex===previousHex&&sameDay)count++;
-  else{knownDay=null;knownKind=null;}
-  previousHex=hex;
+  if(day&&knownDay&&(day!==knownDay||row.timeKind!==knownKind)){previousHex=null;knownDay=null;knownKind=null;runLength=0;}
+  if(!row.raw?.trim()){if(previousHex&&day){knownDay=day;knownKind=row.timeKind;}continue;}
+  if(!hex||row.error){previousHex=null;knownDay=null;knownKind=null;runLength=0;continue;}
+  if(hex===previousHex){
+   repeats++;payloadCount++;
+   if(runLength===1){indices.add(previousIndex);payloadCount++;}
+   for(let gap=previousIndex+1;gap<=index;gap++)indices.add(gap);
+   runLength++;
+  }else{runLength=1;knownDay=null;knownKind=null;}
+  previousHex=hex;previousIndex=index;
   if(day){knownDay=day;knownKind=row.timeKind;}
  }
- return count;
+ return {indices,repeats,payloadCount};
 }
+export function countConsecutiveRepeats(rows) {return continuousDuplicates(rows).repeats;}
