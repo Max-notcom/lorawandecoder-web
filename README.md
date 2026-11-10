@@ -145,3 +145,11 @@ Application uplinks on ports 1–223 are decrypted locally in the background wor
 Keys stay only in the current tab/worker memory. They are never put into browser storage, CSV exports, URLs, logs or repository files. **Clear key** removes the input; refreshing clears it. If browser storage is enabled, the dataset can include decrypted plaintext and readings, but never the key. Saved plaintext can be reinterpreted without retaining keys. CSV exports include decryption status, assumed counter, MICVerified=false and decrypted application Base64. Imported decryption is explicitly unauthenticated; the app never guesses session keys or full counters.
 
 Use the already-decrypted/sensor mode for plaintext application payloads. Gateway CSVs with the recognized radio-export headers select radio mode automatically; they do not automatically supply a key or target address.
+
+## Why some radio rows remain unreadable
+
+A session AppSKey is scoped to the selected device address. Encrypted rows outside that address explicitly say the key was not applied. Control/ACK frames without FRMPayload have no sensor readings to recover. FPort 0 carries network MAC commands and requires network-key handling, not the application key. Malformed headers and source CRC failures remain rejected.
+
+A wrong key can accidentally produce bytes with a recognizable sensor type. Decryption candidates with reserved sensor-status bits set, or measurement types inconsistent with the selected known model, are retained as rejected candidates rather than charted as sensor readings. Inspect and CSV retain a rejection reason and candidate bytes for investigation. These checks reduce misleading results; they do not replace MIC authentication and cannot prove every plausible candidate correct.
+
+Prefer uploading the original gateway CSV. Pasting only timestamp/payload columns loses source CRC status and timing uncertainty. Spreadsheet applications can also interpret Base64 beginning with `+` as a formula, replacing it with an error such as `#NAME?`; that text is not a recoverable radio packet.

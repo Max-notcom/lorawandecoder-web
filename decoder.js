@@ -65,7 +65,7 @@ export function decode(payload,{encoding='auto',model='Unknown',profile='english
  const r={type,label:'',hex:Array.from(b,x=>x.toString(16).padStart(2,'0')).join(' '),encoding,profile,values:{},units:{},status:null,flags:[],invalidFields:[],overrangeFields:[],diagnostics:[],warnings:[]};
  if(format==='lorawan') {
   const mhdr=b[0],mtype=mhdr>>>5;
-  if(!b.length||(mhdr&31)!==0)throw Error('Invalid or unsupported LoRaWAN header/version');
+  if(!b.length||(mhdr&31)!==0)throw Error('Invalid or unsupported LoRaWAN header/version: reserved or version bits are nonzero; possible corrupted frame');
   const names=['Join request','Join accept','Unconfirmed uplink','Unconfirmed downlink','Confirmed uplink','Confirmed downlink'];
   if(mtype>5)throw Error(`Unsupported LoRaWAN message type ${mtype}`);
   r.radioFrame=true;r.type=mhdr;r.label=names[mtype];
@@ -125,6 +125,7 @@ export function decode(payload,{encoding='auto',model='Unknown',profile='english
   });
   if(r.status&0x100)r.flags.push('Simulation mode');
   const unknown=r.status & ~known & 0xffff;
+  r.reservedStatusBits=unknown;
   if(unknown)r.warnings.push(`Reserved status bits set: 0x${unknown.toString(16).padStart(4,'0')}`);
  };
  if(type===0x00) {

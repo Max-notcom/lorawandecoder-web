@@ -2,6 +2,7 @@ import {decode,isChartable,convertValue} from './decoder.js';
 import {markDuplicates,parseDelimited,detectDelimiter,filterRows,pageNumbers,DATA_GROUPS,matchesDataKind,summarizeRecords,topContributors,continuousDuplicates} from './data.js';
 import {drawCharts} from './charts.js';
 import {saveDataset,loadDataset,clearDataset} from './storage.js';
+import {decodeApplicationCandidate} from './lorawan-crypto.js';
 const $=id=>document.getElementById(id);
 let rows=[],selected=new Set(),fields=[],page=0,source='Pasted input',busy=false,restoring=false,loadedText=null,disposeCharts=()=>{},worker=null,job=0,storageQueue=Promise.resolve();
 const pending=new Map();const PAGE_SIZE=50;
@@ -66,7 +67,7 @@ function renderTable(){
    const warned=d.flags.length||d.warnings.length;details.append(el('span',['decoded_unverified','downlink_plaintext'].includes(r.decryption?.status)?'Decrypted · unverified':d.radioFrame?(d.encrypted?'Encrypted':'Radio frame'):d.special?'Special':warned?'Flagged':'Decoded','badge'+(warned?' warning':'')));
    const disclosure=el('details'),summary=el('summary','Inspect'),content=el('pre');
    const full=Object.entries(d.values).map(([k,v])=>`${k}: ${String(v)}${d.units[k]?' '+d.units[k]:''}`);
-   content.textContent=[`Protocol edition: ${d.profile==='japanese'?'Japanese (legacy)':'English (current)'}`,`Encoding: ${d.encoding}`,r.radioEnvelope?'Decrypted application bytes: '+d.hex:`Bytes: ${d.hex}`,r.radioEnvelope?'Radio frame bytes: '+r.radioEnvelope.hex:'',r.decryption?'Decryption: '+r.decryption.status+'; assumed FCnt32 '+r.decryption.counter+'; MIC not verified':'',r.timestampMethod?'Timestamp method: '+r.timestampMethod:'',r.timestampNote?'Timestamp note: '+r.timestampNote:'',d.status===null?'':`Measurement status: 0x${d.status.toString(16).padStart(4,'0')}`,d.measurementCount==null?'':`Measurement count: ${d.measurementCount}`,...full,...(r.radioEnvelope?Object.entries(r.radioEnvelope.values).map(([key,value])=>`${key}: ${String(value)}`):[]),...(r.radioEnvelope?.diagnostics||[]),...d.flags,...d.warnings,...d.diagnostics].filter(Boolean).join('\n');disclosure.append(summary,content);details.append(disclosure);
+   content.textContent=[`Protocol edition: ${d.profile==='japanese'?'Japanese (legacy)':'English (current)'}`,`Encoding: ${d.encoding}`,r.radioEnvelope?'Decrypted application bytes: '+d.hex:`Bytes: ${d.hex}`,r.radioEnvelope?'Radio frame bytes: '+r.radioEnvelope.hex:'',r.decryption?'Decryption: '+r.decryption.status+(r.decryption.counter===undefined?'':'; assumed FCnt32 '+r.decryption.counter)+'; MIC not verified':'',r.decryption?.reason?'Candidate rejection: '+r.decryption.reason:'',r.decryption?.plaintextBase64?'Candidate application bytes (Base64): '+r.decryption.plaintextBase64:'',r.timestampMethod?'Timestamp method: '+r.timestampMethod:'',r.timestampNote?'Timestamp note: '+r.timestampNote:'',d.status===null?'':`Measurement status: 0x${d.status.toString(16).padStart(4,'0')}`,d.measurementCount==null?'':`Measurement count: ${d.measurementCount}`,...full,...(r.radioEnvelope?Object.entries(r.radioEnvelope.values).map(([key,value])=>`${key}: ${String(value)}`):[]),...(r.radioEnvelope?.diagnostics||[]),...d.flags,...d.warnings,...d.diagnostics].filter(Boolean).join('\n');disclosure.append(summary,content);details.append(disclosure);
   }
   tr.append(identity,time,raw,values,details);fragment.append(tr);
  }
@@ -84,14 +85,29 @@ $('decode').onclick=async()=>{
   const result=await request({text:loadedText??$('input').value,options:{source,format:$('format').value,appSKey:$('format').value==='lorawan'?$('appSKey').value:'',deviceAddress:$('deviceAddress').value,counterHigh:Number($('counterHigh').value),payloadColumn:$('payloadColumn').value.trim()||'data',encoding:$('encoding').value,model:$('model').value,profile:$('profile').value,timestampColumn:$('timestampColumn').value.trim()||'auto',timestampFormat:$('timestampFormat').value}});
   rows=mode==='append'?[...rows,...result.rows]:result.rows;markDuplicates(rows);if(!rows.some(r=>r.time!==null))$('axis').value='sample';page=0;refreshFields(mode==='append');render();persistCurrent();
   const errors=rows.filter(r=>r.error).length,tsErrors=rows.filter(r=>r.timestampError).length;
-  message(`${rows.length.toLocaleString()} rows loaded · ${rows.filter(r=>r.decoded&&!r.decoded.radioFrame).length.toLocaleString()} payloads decoded · ${rows.filter(r=>r.decoded?.radioFrame||r.radioEnvelope).length.toLocaleString()} radio frames inspected · ${rows.filter(r=>r.decryption?.status==='decoded_unverified').length} decrypted (MIC unverified)${errors?` · ${errors.toLocaleString()} payload issues`:''}${tsErrors?` · ${tsErrors} timestamp issues`:''}. Original order retained.`,errors||tsErrors?'':'success');
+  const missingCRC=$('format').value==='lorawan'&&rows.some(r=>(r.decoded?.radioFrame||r.radioEnvelope)&&!r.radioCRCStatus);
+  message(`${rows.length.toLocaleString()} rows loaded · ${rows.filter(r=>r.decoded&&!r.decoded.radioFrame).length.toLocaleString()} payloads decoded · ${rows.filter(r=>r.decoded?.radioFrame||r.radioEnvelope).length.toLocaleString()} radio frames inspected · ${rows.filter(r=>r.decryption?.status==='decoded_unverified').length} decrypted (MIC unverified)${errors?` · ${errors.toLocaleString()} payload issues`:''}${tsErrors?` · ${tsErrors} timestamp issues`:''}. Original order retained.${missingCRC?' Source CRC metadata is missing for some frames; upload the complete gateway CSV to preserve it.':''}`,errors||tsErrors?'':'success');
  }catch(e){message(`${e.message}. The previous dataset has been kept.`, 'error');}finally{setBusy(false);}
 };
 $('input').oninput=()=>{loadedText=null;source='Pasted input';$('source').textContent='Pasted input · CSV/Excel uses the header selected below';updateColumnHints(true);};
 $('file').onchange=async()=>{const file=$('file').files[0];if(!file)return;try{message('Reading file locally…');const text=await file.text();loadedText=text;$('input').value=text.slice(0,8000);$('input').readOnly=text.length>8000;source=file.name;$('source').textContent=`${file.name} · ${(file.size/1024).toFixed(1)} KB · ready to decode${text.length>8000?' · preview truncated; full file will decode':''}`;updateColumnHints(true);message('File ready. Choose settings, then Decode input.');}catch(e){message(`Could not read file: ${e.message}`,'error');}finally{$('file').value='';}};
 $('pasteMode').onclick=()=>{loadedText=null;$('input').readOnly=false;$('input').value='';source='Pasted input';$('source').textContent='Pasted input · CSV/Excel uses the header selected below';$('input').focus();};
 $('example').onclick=()=>{$('format').value='sensor';$('keyControls').hidden=true;$('timestampColumn').value='auto';$('payloadColumn').value='data';loadedText=null;$('input').readOnly=false;$('input').value='data,ts\nEAAANmFADE8w,2026-10-06 (09:00:00.000)\nEQAASRJA4058,2026-10-06 (09:15:00.000)\nEAAANmFADE8w,2026-10-06 (09:30:00.000)';source='Example';$('source').textContent='Example · three packets including one repeated payload';updateColumnHints();message('Example ready. Select Decode input.');};
-function reinterpretRows(all=false){for(const r of rows)if(r.decoded&&!r.decoded.radioFrame&&(all||r.decoded.type===0x41)){try{r.decoded=decode(r.decryption?.status==='decoded_unverified'?r.decryption.plaintextBase64:r.raw,{encoding:r.decryption?.status==='decoded_unverified'?'base64':r.decoded.encoding,model:$('model').value,profile:$('profile').value});if(r.decryption?.status==='decoded_unverified')r.decoded.warnings.push('Decrypted with supplied AppSKey; MIC not verified.');}catch(e){r.error=e.message;}}render();persistCurrent();}
+function reinterpretRows(all=false){
+ for(const r of rows){
+  const envelope=r.radioEnvelope||(r.decoded?.radioFrame?r.decoded:null);
+  const candidate=r.decryption?.plaintextBase64&&['decoded_unverified','plaintext_rejected','plaintext_not_recognized'].includes(r.decryption.status)&&envelope&&[0x40,0x80].includes(envelope.type);
+  if(!r.decoded||(!candidate&&(r.decoded.radioFrame||(!all&&r.decoded.type!==0x41))))continue;
+  try{
+   if(candidate){r.decoded=decodeApplicationCandidate(r.decryption.plaintextBase64,{model:$('model').value,profile:$('profile').value});r.decoded.warnings.push('Decrypted with supplied AppSKey; MIC not verified.');envelope.values.LoRaWANPayloadStatus='Encrypted application payload (original radio frame)';envelope.warnings=envelope.warnings.filter(warning=>!warning.startsWith('Candidate rejection:'));r.radioEnvelope=envelope;r.decryption.status='decoded_unverified';delete r.decryption.reason;}
+   else r.decoded=decode(r.raw,{encoding:r.decoded.encoding,model:$('model').value,profile:$('profile').value});
+  }catch(error){
+   if(candidate){r.decoded=envelope;delete r.radioEnvelope;r.decryption.status='plaintext_rejected';r.decryption.reason=error.message;r.decoded.values.LoRaWANPayloadStatus='Decryption candidate not accepted; confirm key, counter, session and model';const warning='Candidate rejection: '+error.message;if(!r.decoded.warnings.includes(warning))r.decoded.warnings.push(warning);}
+   else r.error=error.message;
+  }
+ }
+ markDuplicates(rows);refreshFields(true);render();persistCurrent();
+}
 $('model').onchange=()=>reinterpretRows();$('profile').onchange=()=>reinterpretRows(true);
 for(const id of settingIDs.filter(id=>id!=='model'&&id!=='profile'&&id!=='payloadColumn'&&id!=='format'))$(id).onchange=()=>{render();persistCurrent();};
 $('format').onchange=()=>{$('keyControls').hidden=$('format').value!=='lorawan';persistCurrent();};
@@ -114,7 +130,7 @@ async function restore(){
  try{
   if(localStorage.getItem('payload-decoder-remember')!=='1')return;
   restoring=true;$('persist').checked=true;setBusy(true);message('Restoring locally saved dataset…');const saved=await loadDataset();
-  if(saved){rows=saved.rows;for(const id of settingIDs)if(saved.settings&&id in saved.settings){if($(id).type==='checkbox')$(id).checked=!!saved.settings[id];else $(id).value=saved.settings[id];}$('keyControls').hidden=$('format').value!=='lorawan';markDuplicates(rows);refreshFields();selected=new Set((saved.selected||fields).filter(f=>fields.includes(f)));for(const box of $('series').querySelectorAll('input'))box.checked=selected.has(box.value);render();message(`Restored ${rows.length.toLocaleString()} rows from this browser.`, 'success');$('storageStatus').textContent='Latest dataset restored from this browser.';}
+  if(saved){rows=saved.rows;for(const id of settingIDs)if(saved.settings&&id in saved.settings){if($(id).type==='checkbox')$(id).checked=!!saved.settings[id];else $(id).value=saved.settings[id];}$('keyControls').hidden=$('format').value!=='lorawan';reinterpretRows(true);refreshFields();selected=new Set((saved.selected||fields).filter(f=>fields.includes(f)));for(const box of $('series').querySelectorAll('input'))box.checked=selected.has(box.value);render();message(`Restored ${rows.length.toLocaleString()} rows from this browser.`, 'success');$('storageStatus').textContent='Latest dataset restored from this browser.';}
   else {message('Ready for input. Browser storage is enabled.');$('storageStatus').textContent='Storage enabled · no saved dataset.';}
  }catch(e){message(`Saved data could not be restored: ${e.message}. Import a file or clear saved data.`,'error');}finally{restoring=false;setBusy(false);}
 }
