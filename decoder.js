@@ -46,21 +46,57 @@ function bytesFrom(text,encoding) {
  if(btoa(decoded).replace(/=+$/,'')!==clean.replace(/=+$/,'')) throw Error('Invalid Base64 trailing bits');
  return Uint8Array.from(decoded,c=>c.charCodeAt(0));
 }
-export function decode(payload,{encoding='auto',model='Unknown',profile='english'}={}) {
+export function decode(payload,{encoding='auto',model='Unknown',profile='english',format='sensor'}={}) {
  if(typeof payload!=='string') throw Error('Payload must be text');
  if(!['auto','hex','base64'].includes(encoding)) throw Error('Unknown encoding');
  if(!['english','japanese'].includes(profile))throw Error('Unknown protocol profile');
+ if(!['sensor','lorawan'].includes(format))throw Error('Unknown payload format');
  if(encoding==='auto') {
   const candidates=[]; const errors=[];
-  for(const mode of ['hex','base64']) {try {candidates.push(decode(payload,{encoding:mode,model,profile}));}catch(e){errors.push(e.message);}}
+  for(const mode of ['hex','base64']) {try {candidates.push(decode(payload,{encoding:mode,model,profile,format}));}catch(e){errors.push(e.message);}}
   if(candidates.length===2) throw Error('Ambiguous encoding: choose Hex or Base64');
   if(candidates.length===1) return candidates[0];
   if(!payload.trim()) throw Error('Missing payload');
   throw Error(`Cannot decode payload. Hex: ${errors[0]}. Base64: ${errors[1]}`);
  }
  const b=bytesFrom(payload,encoding), d=new DataView(b.buffer);
+ if(format==='lorawan'&&b.length>255)throw Error('LoRaWAN PHYPayload length exceeds the 255-byte maximum');
  const type=b[0]===0x80 && b.length>=2?d.getUint16(0):b[0];
  const r={type,label:'',hex:Array.from(b,x=>x.toString(16).padStart(2,'0')).join(' '),encoding,profile,values:{},units:{},status:null,flags:[],invalidFields:[],overrangeFields:[],diagnostics:[],warnings:[]};
+ if(format==='lorawan') {
+  const mhdr=b[0],mtype=mhdr>>>5;
+  if(!b.length||(mhdr&31)!==0)throw Error('Invalid or unsupported LoRaWAN header/version');
+  const names=['Join request','Join accept','Unconfirmed uplink','Unconfirmed downlink','Confirmed uplink','Confirmed downlink'];
+  if(mtype>5)throw Error(`Unsupported LoRaWAN message type ${mtype}`);
+  r.radioFrame=true;r.type=mhdr;r.label=names[mtype];
+  r.values.LoRaWANMessageType=r.label;
+  const hex=bytes=>Array.from(bytes,x=>x.toString(16).padStart(2,'0')).join('').toUpperCase();
+  r.warnings.push('Radio-frame inspection only: MIC/authenticity is not verified. Device model is not established by the frame header.');
+  if(mtype===0){
+   if(b.length!==23)throw Error('Join-request length must be 23 bytes');
+   r.values.LoRaWANJoinEUI=hex(b.slice(1,9).reverse());r.values.LoRaWANDevEUI=hex(b.slice(9,17).reverse());r.values.LoRaWANDevNonce=d.getUint16(17,true);r.values.LoRaWANMIC=hex(b.slice(-4));r.values.LoRaWANPayloadStatus='Join request; no sensor readings';
+  }else if(mtype===1){
+   if(![17,33].includes(b.length))throw Error('Encrypted join-accept length must be 17 or 33 bytes');
+   r.encrypted=true;r.values.LoRaWANEncryptedJoinAccept=hex(b.slice(1));r.values.LoRaWANPayloadStatus='Encrypted join accept; session parameters unavailable';
+  }else{
+   if(b.length<12)throw Error('LoRaWAN data-frame length must be at least 12 bytes');
+   const optionsLength=b[5]&15,start=8+optionsLength,end=b.length-4;
+   if(start>end)throw Error('Invalid LoRaWAN FOpts length: options overlap MIC');
+   r.values.LoRaWANDeviceAddress=d.getUint32(1,true).toString(16).padStart(8,'0').toUpperCase();
+   r.values.LoRaWANFCnt16=d.getUint16(6,true);r.values.LoRaWANACK=!!(b[5]&0x20);r.values.LoRaWANFOpts=hex(b.slice(8,start));r.values.LoRaWANMIC=hex(b.slice(-4));
+   if(start<end){
+    const port=b[start],payload=b.slice(start+1,end);
+    if(optionsLength&&port===0)throw Error('Invalid LoRaWAN MAC placement: FOpts and FPort 0 cannot coexist');
+    r.values.LoRaWANFPort=port;r.values.LoRaWANEncryptedPayload=hex(payload);r.encrypted=payload.length>0;
+    r.values.LoRaWANPayloadStatus=payload.length?(port===0?'Encrypted MAC commands':'Encrypted application payload; sensor values unavailable'):'Empty FRMPayload';
+    if(port>223)r.warnings.push('Reserved/test FPort; application meaning is not inferred');
+   }else r.values.LoRaWANPayloadStatus='No FRMPayload; no sensor readings';
+   r.diagnostics.push('FCnt16 is only the transmitted low 16 bits; the full session frame counter is not reconstructed. FOpts interpretation depends on LoRaWAN version.');
+  }
+  if(r.encrypted)r.warnings.push('Decryption requires the correct session keys and counter/session context, or a decrypted application payload from the network server. Ciphertext is never passed to the sensor decoder.');
+  r.diagnostics.push('Downlink frames in gateway logs may describe requested scheduling; successful radio transmission is not proven here.');
+  return r;
+ }
  // Recognize only the supplied sequence; without frame metadata, do not guess other MAC messages.
  if(r.hex.replaceAll(' ','')==='03200100710320ff000103200000410400050868e28c') {
   r.special=true;r.label='Special network-control sequence';
@@ -153,7 +189,7 @@ export function decode(payload,{encoding='auto',model='Unknown',profile='english
  for(const [name,value] of Object.entries(r.values))if(/Longitude|Latitude/.test(name)&&Number.isFinite(value)&&Math.abs(value)>(name.includes('Longitude')?180:90)){r.warnings.push(`${name}: coordinate outside valid range`);r.invalidFields.push(name);}
  return r;
 }
-export function isChartable(name,value) {return typeof value==='number'&&!['DiagnosticStatus','DiagnosticDetail','VendorID','DeviceType','DeviceRevision','TemperatureDisplayUnitCode','VoltageDisplayUnitCode','PressureDisplayUnitCode','ReservedDisplayUnitWord'].includes(name);}
+export function isChartable(name,value) {return typeof value==='number'&&!name.startsWith('LoRaWAN')&&!['DiagnosticStatus','DiagnosticDetail','VendorID','DeviceType','DeviceRevision','TemperatureDisplayUnitCode','VoltageDisplayUnitCode','PressureDisplayUnitCode','ReservedDisplayUnitWord'].includes(name);}
 export function convertValue(value,unit,{temperature='native',pressure='native'}={}) {
  if(unit==='°C'&&temperature==='fahrenheit')return [value*9/5+32,'°F'];
  if(unit==='MPa'&&pressure!=='native')return [value*(pressure==='bar'?10:145.03773773020923),pressure==='bar'?'bar':'psi'];

@@ -123,3 +123,25 @@ Select **Continuous duplicates only** in the decoded table to see every matching
 The record summary separately shows overall duplicated payload rows and continuous duplicated payload rows. The top indicator counts extra continuous repeats. These overlapping metrics do not change record-type counts or percentages. No rows are deleted, and charts/CSV export still use the full dataset.
 
 Known calendar-date changes and non-empty undecodable records break a run. This also applies to dated empty rows between matching payloads. ISO dates retain their recorded date, epoch timestamps use UTC, and incompatible known date bases are not joined. Counts update across append boundaries and after storage restore. Without timestamps, only source order is available. Identical bytes alone do not prove a retransmission or a meaningless reading.
+
+## Gateway radio frames versus sensor application payloads
+
+Choose **Payload format → Sensor application payload** for decrypted sensor data. XS540 application formats remain `0x51`–`0x58`. Choose **LoRaWAN radio frame (PHYPayload)** for complete gateway `rxpk`/`txpk` frames. These contain radio headers and commonly encrypted FRMPayload, not directly readable sensor measurements.
+
+CSV exports with the header combination `data_base64`, `payload_hex`, and `packet_kind` automatically select radio inspection and the `data_base64` column. `timestamp_utc` is selected when present. You can override these settings before decoding. Fractional-second timestamps up to nine digits are accepted; chart time truncates to milliseconds while source timestamp text and supplied uncertainty notes are retained.
+
+Inspection supports join requests, encrypted join accepts, and confirmed/unconfirmed uplink/downlink data frames. It reports header fields, the low 16-bit counter, port, raw options, encrypted payload bytes and unverified integrity information. Radio fields do not become sensor measurements or chart series, and separate counters distinguish decoded payloads from inspected radio frames. Full counters, MIC validation, model attribution and successful downlink transmission are not inferred.
+
+Records whose source CRC status is `CRC_FAIL` remain errors. `CRC_OK` is source-reported, not an independent verification or proof of authenticity. Join-accept contents remain encrypted. Extracted FRMPayload fields explicitly labeled encrypted are rejected in sensor mode rather than interpreted as vibration data. To obtain XS540 readings, import decrypted application payloads from the network/application server, or use the optional local AppSKey controls with the correct target address and session-counter context. Optional local AppSKey decryption is available as described below.
+
+Exports retain the source CRC status, timestamp method and timestamp uncertainty note. Radio frames remain distinct from sensor packet types in summaries and filters. All processing stays within the browser; no payloads or keys are uploaded.
+
+## Optional local AppSKey decryption
+
+Select **Payload format → LoRaWAN radio frame (PHYPayload)** and expand **Optional local decryption**. Enter the session AppSKey, its target DevAddr, and the high 16 bits of the full session frame counter (0 only when no rollover has occurred). The AppSKey is not the root AppKey or the network integrity key. It applies only to the specified device address and session/counter context; other devices remain encrypted.
+
+Application uplinks on ports 1–223 are decrypted locally in the background worker, then passed to the existing sensor decoder. Recognized readings show **Decrypted · unverified**. MIC is not verified, so a plausible decode is not proof of authenticity or a correct key/counter. Confirm the session context before relying on readings. Original radio bytes, assumed full counter and decrypted application bytes remain visible in Inspect and exports. Downlink plaintext is inspectable but is not treated as sensor measurements. FPort 0/network commands and join-accept decryption are not supported with this AppSKey input.
+
+Keys stay only in the current tab/worker memory. They are never put into browser storage, CSV exports, URLs, logs or repository files. **Clear key** removes the input; refreshing clears it. If browser storage is enabled, the dataset can include decrypted plaintext and readings, but never the key. Saved plaintext can be reinterpreted without retaining keys. CSV exports include decryption status, assumed counter, MICVerified=false and decrypted application Base64. Imported decryption is explicitly unauthenticated; the app never guesses session keys or full counters.
+
+Use the already-decrypted/sensor mode for plaintext application payloads. Gateway CSVs with the recognized radio-export headers select radio mode automatically; they do not automatically supply a key or target address.

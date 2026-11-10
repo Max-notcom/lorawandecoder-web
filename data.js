@@ -21,9 +21,9 @@ export function parseDelimited(text,delimiter=',') {
 export function parseTimestamp(raw,format='auto') {
  const value=String(raw??'').trim();if(!value)return {time:null,timeKind:null};
  if(/^\d{10}$|^\d{13}$/.test(value))return {time:Number(value)*(value.length===10?1000:1),timeKind:'instant'};
- let match=value.match(/^(\d{4})-(\d{2})-(\d{2})(?:(?:T|\s+\(?|\()(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?\)?(Z|[+-]\d{2}:?\d{2})?)?$/i);
+ let match=value.match(/^(\d{4})-(\d{2})-(\d{2})(?:(?:T|\s+\(?|\()(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?\)?(Z|[+-]\d{2}:?\d{2})?)?$/i);
  let parts;
- if(match)parts=[+match[1],+match[2],+match[3],+(match[4]||0),+(match[5]||0),+(match[6]||0),+(match[7]||'0').padEnd(3,'0'),match[8]];
+ if(match)parts=[+match[1],+match[2],+match[3],+(match[4]||0),+(match[5]||0),+(match[6]||0),+(match[7]||'0').slice(0,3).padEnd(3,'0'),match[8]];
  else {
   match=value.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
   if(!match)throw Error(`Unrecognized timestamp: ${value}`);
@@ -67,7 +67,7 @@ export function parseInput(input,{source='Pasted input',payloadColumn='data',tim
   dataIndex=matches[0];
   if(timestampColumn!=='none') {
    if(timestampColumn==='auto') {
-    timeIndex=headers.findIndex((x,i)=>i!==dataIndex&&/^(ts|timestamp|time|datetime|date|created_at|received_at)$/i.test(x));
+    timeIndex=headers.findIndex((x,i)=>i!==dataIndex&&/^(ts|timestamp|time|datetime|date|created_at|received_at|timestamp_utc)$/i.test(x));
     if(timeIndex<0) {
      const candidates=headers.flatMap((h,i)=>{if(i===dataIndex)return [];const vals=records.slice(0,10).map(r=>r.cells[i]).filter(Boolean);if(!vals.length)return [];try {return vals.every(v=>parseTimestamp(v,timestampFormat).time!==null)?[i]:[];}catch{return [];}});
      if(candidates.length===1)timeIndex=candidates[0];
@@ -79,11 +79,11 @@ export function parseInput(input,{source='Pasted input',payloadColumn='data',tim
   const r={source,row:i+(structured?2:1),line:rec.line,column:payloadColumn,raw:rec.cells[dataIndex]??'',timestamp:timeIndex<0?'':rec.cells[timeIndex]??'',time:null,timeKind:null,error:null,timestampError:null};
   if(structured&&rec.cells.length!==headers.length)r.error=`Column count mismatch at line ${rec.line}: expected ${headers.length}, received ${rec.cells.length}`;
   try{Object.assign(r,parseTimestamp(r.timestamp,timestampFormat));}catch(e){r.timestampError=`Column ${headers[timeIndex]}: ${e.message}`;}
-  r.timestampColumn=timeIndex<0?null:headers[timeIndex];return r;
+  r.timestampColumn=timeIndex<0?null:headers[timeIndex];for(const [key,column] of [['radioCRCStatus','crc_status'],['payloadInterpretation','payload_interpretation'],['timestampMethod','timestamp_method'],['timestampNote','timestamp_uncertainty_note']]){const idx=headers.indexOf(column);if(idx>=0)r[key]=rec.cells[idx]||'';}return r;
  });
 }
 export function processInput(text,options={}) {
- return parseInput(text,options).map(r=>{if(!r.error){try{r.decoded=decode(r.raw,options);}catch(e){r.error=`Column ${r.column}: ${e.message}`;}}return r;});
+ return parseInput(text,options).map(r=>{if(!r.error){try{if(options.format!=='lorawan'&&['frm_payload_base64','frm_payload_hex'].includes(r.column)&&r.payloadInterpretation?.startsWith('encrypted_'))throw Error('Source labels this FRMPayload as encrypted; a decrypted application payload is required for sensor readings');if(options.format==='lorawan'&&r.radioCRCStatus?.trim().toUpperCase()==='CRC_FAIL')throw Error('Source reports CRC_FAIL: corrupted radio frame is not interpreted');r.decoded=decode(r.raw,options);if(r.decoded.radioFrame&&r.radioCRCStatus)r.decoded.diagnostics.push('Source-reported radio CRC: '+r.radioCRCStatus+' (not independently verified)');}catch(e){r.error=`Column ${r.column}: ${e.message}`;}}return r;});
 }
 export function markDuplicates(rows) {
  const counts=new Map();for(const r of rows){if(r.decoded){const key=r.decoded.hex;counts.set(key,(counts.get(key)||0)+1);}}
@@ -97,9 +97,9 @@ const safeCell=value=>{
 export function exportCSV(rows) {
  const fields=[...new Set(rows.flatMap(r=>Object.keys(r.decoded?.values||{})))];
  const fieldInfo=fields.map(name=>{const units=[...new Set(rows.filter(r=>r.decoded&&name in r.decoded.values).map(r=>r.decoded.units[name]||''))];return {name,unit:units[0]||'',mixed:units.length>1};});
- const headers=['Source','SourceRow','SourceLine','PayloadColumn','Timestamp','TimestampKind','RawPayload','PacketType','ProtocolEdition',...fieldInfo.flatMap(({name,unit,mixed})=>mixed?[`${name} (mixed units)`,name+'Unit']:[unit?`${name} (${unit})`:name]),'MeasurementStatus','Flags','Warnings','Diagnostics','Error','TimestampError'];
+ const headers=['Source','SourceRow','SourceLine','PayloadColumn','RadioCRCStatus','TimestampMethod','TimestampNote','Timestamp','TimestampKind','RawPayload','PacketType','ProtocolEdition','DecryptionStatus','DecryptionDeviceAddress','FCnt32Assumed','MICVerified','DecryptedPayloadBase64',...fieldInfo.flatMap(({name,unit,mixed})=>mixed?[`${name} (mixed units)`,name+'Unit']:[unit?`${name} (${unit})`:name]),'MeasurementStatus','Flags','Warnings','Diagnostics','Error','TimestampError'];
  const lines=[headers.map(safeCell).join(',')];
- for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.column||'data',r.timestamp,r.timeKind,r.raw,d?(d.special?'special':`0x${d.type.toString(16)}`):'',d?(d.profile||'english'):'',...fieldInfo.flatMap(({name,mixed})=>mixed?[d?.values[name]??'',d?.units[name]||'']:[d?.values[name]??'']),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
+ for(const r of rows){const d=r.decoded;lines.push([r.source,r.row,r.line,r.column||'data',r.radioCRCStatus,r.timestampMethod,r.timestampNote,r.timestamp,r.timeKind,r.raw,d?(d.radioFrame?'LoRaWAN '+d.label:d.special?'special':`0x${d.type.toString(16)}`):'',d?(d.profile||'english'):'',r.decryption?.status,r.decryption?.address,r.decryption?.counter,r.decryption?false:'',r.decryption?.plaintextBase64,...fieldInfo.flatMap(({name,mixed})=>mixed?[d?.values[name]??'',d?.units[name]||'']:[d?.values[name]??'']),d?.status,d?.flags.join('; '),d?.warnings.join('; '),d?.diagnostics.join('; '),r.error,r.timestampError].map(safeCell).join(','));}
  return '\ufeff'+lines.join('\r\n');
 }
 
@@ -117,14 +117,16 @@ export const DATA_GROUPS = {
  initialization:['Initialization',name=>name==='TagName'],
  special:['Special messages',name=>name==='SpecialMessage'],
  reporting:['Reporting interval',name=>name==='TransmissionInterval'],
+ radio:['LoRaWAN radio frames',name=>name==='LoRaWANMessageType'],
  units:['Display unit codes',name=>name.endsWith('DisplayUnitCode')]
 };
 export function matchesDataKind(row,kind='all') {
  if(kind==='all')return true;
  if(!row.decoded)return false;
  const [mode,value]=kind.split(':');
- if(mode==='type')return row.decoded.type===Number(value);
- const names=Object.keys(row.decoded.values);
+ if(mode==='type')return !row.decoded.radioFrame&&row.decoded.type===Number(value);
+ if(mode==='frame'){const frame=row.radioEnvelope||(row.decoded.radioFrame?row.decoded:null);return frame?.type===Number(value);}
+ const names=[...Object.keys(row.decoded.values),...Object.keys(row.radioEnvelope?.values||{})];
  return mode==='field'?names.includes(value):mode==='group'&&!!DATA_GROUPS[value]&&names.some(DATA_GROUPS[value][1]);
 }
 export function filterRows(rows,{status='all',kind='all',query=''}={}) {
@@ -137,7 +139,7 @@ export function filterRows(rows,{status='all',kind='all',query=''}={}) {
   if(continuous&&!continuous.has(index))return false;
   if(!matchesDataKind(row,kind))return false;
   if(!search)return true;
-  return [row.raw,row.source,row.row,row.timestamp,row.error,row.timestampError,d?.label,d?(d.special?'special':`0x${d.type.toString(16)}`):'',...Object.entries(d?.values||{}).map(([name,value])=>`${name} ${String(value)}`),...(d?.flags||[]),...(d?.warnings||[]),...(d?.diagnostics||[])].join(' ').toLowerCase().includes(search);
+  return [row.raw,row.source,row.row,row.timestamp,row.error,row.timestampError,d?.label,d?(d.radioFrame?'LoRaWAN '+d.label:d.special?'special':`0x${d.type.toString(16)}`):'',...Object.entries({...d?.values,...row.radioEnvelope?.values}).map(([name,value])=>`${name} ${String(value)}`),...(d?.flags||[]),...(d?.warnings||[]),...(d?.diagnostics||[])].join(' ').toLowerCase().includes(search);
  });
 }
 export function pageNumbers(total,current) {
@@ -168,8 +170,8 @@ export function summarizeRecords(rows) {
  };
  for(const row of rows){
   const d=row.decoded;
-  const type=!row.raw?.trim()?'Empty records':!d?'Other undecoded payloads':d.special?'special':d.type>=0x44&&d.type<=0x46?'0x44–0x46':`0x${d.type.toString(16).padStart(2,'0')}`;
-  if(!groups.has(type))groups.set(type,{type,count:0,meaning:meanings[type]||d?.label||'Decoded record'});
+  const type=!row.raw?.trim()?'Empty records':!d?'Other undecoded payloads':d.radioFrame?'LoRaWAN '+d.label:d.special?'special':d.type>=0x44&&d.type<=0x46?'0x44–0x46':`0x${d.type.toString(16).padStart(2,'0')}`;
+  if(!groups.has(type))groups.set(type,{type,count:0,meaning:meanings[type]||(d?.radioFrame?'Radio envelope only; application data may be encrypted and MIC is unverified':d?.label)||'Decoded record'});
   groups.get(type).count++;
   if(d?.type===0x48)intervals.add(d.values.TransmissionInterval);
  }
